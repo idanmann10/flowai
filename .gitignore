@@ -1,0 +1,100 @@
+# Dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Build outputs
+dist/
+dist-electron/
+out/
+build/
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Logs
+logs
+*.log
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage directory used by tools like istanbul
+coverage/
+
+# nyc test coverage
+.nyc_output
+
+# Dependency directories
+jspm_packages/
+
+# Optional npm cache directory
+.npm
+
+# Optional REPL history
+.node_repl_history
+
+# Output of 'npm pack'
+*.tgz
+
+# Yarn Integrity file
+.yarn-integrity
+
+# Electron specific
+app/
+packages/
+
+# Temporary files
+tmp/
+temp/
+
+# Supabase
+.supabase/
+
+# TRACKER DATA - EXCLUDE ALL TRACKER OUTPUT
+tracker/output/
+tracker/v1-legacy/
+tracker/v2/
+tracker/v3/output/
+tracker/v3/output/batches/
+tracker/v3/output/raw/
+tracker/v3/output/demo/
+tracker/v3/output/optimized_*.json
+tracker/v3/output/test_*.json
+
+# Large data files
+*.jsonl
+*.json.gz
+*.zip
+*.tar.gz
+
+# Test data
+test-*.js
+demo-*.js
+
+# Development files
+*.tsbuildinfo 

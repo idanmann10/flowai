@@ -1,0 +1,17 @@
+{
+  "name": "activity-tracker",
+  "version": "1.0.0",
+  "description": "Comprehensive activity tracking system for web and desktop applications",
+  "main": "index.js",
+  "dependencies": {
+    "events": "^3.3.0"
+  },
+  "keywords": [
+    "activity-tracking",
+    "analytics",
+    "user-behavior",
+    "productivity"
+  ],
+  "author": "",
+  "license": "MIT"
+} 
