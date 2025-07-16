@@ -59,7 +59,7 @@ const Sidebar: React.FC = () => {
       <div className="sidebar-header">
         <div className="workspace-info">
           <div className="workspace-avatar">
-            <IconMessageCircle size={16} />
+            <img src="/assets/flow ai logo.png" alt="Flow AI" style={{ width: '32px', height: '20px', objectFit: 'contain' }} />
           </div>
           <div className="workspace-details">
             <h3>LevelAI</h3>

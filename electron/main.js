@@ -433,8 +433,8 @@ function createWindow() {
 function createTray() {
     var _this = this;
     var iconPath = isDev
-        ? path.join(__dirname, '../assets/icon.png')
-        : path.join(__dirname, 'assets/icon.png');
+        ? path.join(__dirname, '../assets/flow ai logo.png')
+        : path.join(__dirname, 'assets/flow ai logo.png');
     tray = new Tray(iconPath);
     var contextMenu = Menu.buildFromTemplate([
         { label: 'Open Dashboard', click: function () { return mainWindow === null || mainWindow === void 0 ? void 0 : mainWindow.show(); } },

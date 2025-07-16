@@ -13,11 +13,10 @@ export const LogoTopBar = () => (
   <MacOSTopBar>
     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
       <img 
-        src="/icon.png" 
-        alt="App Icon" 
-        style={{ width: '16px', height: '16px' }}
+        src="/assets/flow ai logo.png" 
+        alt="Flow AI" 
+        style={{ width: '24px', height: '16px', objectFit: 'contain' }}
       />
-      <span style={{ fontWeight: '500' }}>LevelAI Desktop</span>
     </div>
   </MacOSTopBar>
 )

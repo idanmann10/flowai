@@ -158,8 +158,7 @@ const TitleBar: React.FC = () => {
 
         {/* App Title (Center) */}
         <div className="absolute left-1/2 transform -translate-x-1/2 flex items-center space-x-2">
-          <img src="/icon.png" alt="LevelAI" className="w-4 h-4" />
-          <span className="text-sm font-medium text-text-primary">LevelAI Desktop</span>
+          <img src="/assets/flow ai logo.png" alt="Flow AI" className="w-6 h-4 object-contain" />
         </div>
 
         {/* Empty space for balance */}
@@ -173,8 +172,7 @@ const TitleBar: React.FC = () => {
     <div className="titlebar bg-background-primary border-b border-border-primary h-8 flex items-center justify-between px-4 select-none z-50">
       {/* App Title (Left) */}
       <div className="flex items-center space-x-2">
-        <img src="/icon.png" alt="LevelAI" className="w-4 h-4" />
-        <span className="text-sm font-medium text-text-primary">LevelAI Desktop</span>
+        <img src="/assets/flow ai logo.png" alt="Flow AI" className="w-6 h-4 object-contain" />
       </div>
 
       {/* Windows Window Controls (Right) */}

@@ -356,8 +356,8 @@ function createWindow() {
 
 function createTray() {
   const iconPath = isDev 
-    ? path.join(__dirname, '../assets/icon.png')
-    : path.join(__dirname, 'assets/icon.png')
+    ? path.join(__dirname, '../assets/flow ai logo.png')
+    : path.join(__dirname, 'assets/flow ai logo.png')
 
   tray = new Tray(iconPath)
   const contextMenu = Menu.buildFromTemplate([
