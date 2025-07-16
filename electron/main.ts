@@ -300,7 +300,10 @@ function createWindow() {
     frame: true, // Enable native window controls
     backgroundColor: '#0d0d14', // Set dark background color to match our theme
     titleBarStyle: 'default', // Use default native title bar
-    title: 'Flow AI Desktop', // Set window title for native titlebar
+    title: 'Flow AI', // Set window title for native titlebar
+    icon: isDev 
+      ? path.join(__dirname, '../icon.icns')
+      : path.join(__dirname, 'electron.icns'),
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: true,
@@ -356,8 +359,8 @@ function createWindow() {
 
 function createTray() {
   const iconPath = isDev 
-    ? path.join(__dirname, '../assets/flow ai logo.png')
-    : path.join(__dirname, 'assets/flow ai logo.png')
+    ? path.join(__dirname, '../icon.icns')
+    : path.join(__dirname, 'electron.icns')
 
   tray = new Tray(iconPath)
   const contextMenu = Menu.buildFromTemplate([
@@ -375,7 +378,7 @@ function createTray() {
     { type: 'separator' },
     { label: 'Quit', click: () => app.quit() }
   ])
-  tray.setToolTip('Flow AI Desktop')
+  tray.setToolTip('Flow AI')
   tray.setContextMenu(contextMenu)
 }
 
