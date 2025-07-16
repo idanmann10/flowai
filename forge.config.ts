@@ -5,7 +5,7 @@ import { MakerDMG } from '@electron-forge/maker-dmg'
 
 const config: ForgeConfig = {
   packagerConfig: {
-    icon: './assets/flow ai logo',
+    icon: './src/assets/logo.png',
     asar: true,
     overwrite: true,
     name: 'Flow AI Desktop'

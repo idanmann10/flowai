@@ -23,6 +23,7 @@ import { useSessionSummaryStore } from '../stores/sessionSummaryStore'
 import { useSessionStore } from '../stores/sessionStore'
 import { memoryInsightsService } from '../services/memoryInsightsService'
 import ProductivityBarChart from '../components/ProductivityBarChart';
+import logoUrl from '../assets/flow-ai-logo.png';
 
 interface SessionData {
   id: string;
@@ -732,6 +733,7 @@ const EmployeeDashboard: React.FC = () => {
               fontSize: '2.5rem',
               fontWeight: 800,
               color: 'var(--text-primary)',
+              margin: 0,
               marginBottom: '12px',
               letterSpacing: '-1px',
               textShadow: '0 2px 16px #0006',

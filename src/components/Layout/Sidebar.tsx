@@ -9,6 +9,7 @@ import {
   IconMessageCircle
 } from '@tabler/icons-react'
 import { useAuth } from '../../stores/authStore'
+import logoUrl from '../../assets/flow-ai-logo.png'
 
 const Sidebar: React.FC = () => {
   const location = useLocation()
@@ -57,13 +58,9 @@ const Sidebar: React.FC = () => {
     <div style={{ position: 'relative', height: '100%' }}>
       {/* Sidebar Header */}
       <div className="sidebar-header">
-        <div className="workspace-info">
-          <div className="workspace-avatar">
-            <img src="/assets/flow ai logo.png" alt="Flow AI" style={{ width: '32px', height: '20px', objectFit: 'contain' }} />
-          </div>
-          <div className="workspace-details">
-            <h3>LevelAI</h3>
-            <p>Productivity Analytics</p>
+        <div className="workspace-info" style={{ justifyContent: 'center', padding: '20px 0' }}>
+          <div className="workspace-avatar" style={{ background: 'transparent', width: '120px', height: '50px', padding: '0', display: 'flex', justifyContent: 'center', alignItems: 'center', overflow: 'hidden' }}>
+            <img src={logoUrl} alt="Flow AI" style={{ width: '200%', height: '200%', objectFit: 'cover', display: 'block' }} />
           </div>
         </div>
       </div>

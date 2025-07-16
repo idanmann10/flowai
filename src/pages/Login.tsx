@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { useAuth } from '../stores/authStore'
 import { Button } from '../components/ui/Button'
 import { Input } from '../components/ui/Input'
+import logoUrl from '../assets/flow-ai-logo.png'
 
 const Login = () => {
   const { signIn } = useAuth()
@@ -51,20 +52,28 @@ const Login = () => {
       {/* Main Login Card */}
       <div className="login-card">
         {/* Logo and Branding */}
-        <div className="login-logo-section">
-          <div className="login-logo">
-            L
+        <div className="login-logo-section" style={{ marginBottom: '20px' }}>
+          <div className="login-logo" style={{ 
+            background: 'transparent', 
+            boxShadow: 'none',
+            width: 'auto',
+            height: 'auto',
+            padding: '0',
+            display: 'flex',
+            justifyContent: 'center'
+          }}>
+            <img src={logoUrl} alt="Flow AI" style={{ width: '180px', height: '108px', objectFit: 'contain' }} />
           </div>
-          <h1 className="login-brand-title">
-            LEVELAI
+          <h1 className="login-brand-title" style={{ display: 'none' }}>
+            
           </h1>
-          <p className="login-brand-subtitle">
-            Productivity Analytics
+          <p className="login-brand-subtitle" style={{ display: 'none' }}>
+            
           </p>
         </div>
 
         {/* Welcome Header */}
-        <div className="login-welcome">
+        <div className="login-welcome" style={{ marginBottom: '25px' }}>
           <h2 className="login-welcome-title">
             Welcome Back! 👋
           </h2>

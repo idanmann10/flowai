@@ -1,6 +1,7 @@
 import '../../styles/theme.css'
 import { useEffect, useState } from 'react'
 import React from 'react'
+import logoUrl from '../../assets/flow-ai-logo.png'
 
 declare global {
   interface Window {
@@ -158,7 +159,7 @@ const TitleBar: React.FC = () => {
 
         {/* App Title (Center) */}
         <div className="absolute left-1/2 transform -translate-x-1/2 flex items-center space-x-2">
-          <img src="/assets/flow ai logo.png" alt="Flow AI" className="w-6 h-4 object-contain" />
+          <img src={logoUrl} alt="Flow AI" className="w-8 h-5 object-contain" />
         </div>
 
         {/* Empty space for balance */}
@@ -172,7 +173,7 @@ const TitleBar: React.FC = () => {
     <div className="titlebar bg-background-primary border-b border-border-primary h-8 flex items-center justify-between px-4 select-none z-50">
       {/* App Title (Left) */}
       <div className="flex items-center space-x-2">
-        <img src="/assets/flow ai logo.png" alt="Flow AI" className="w-6 h-4 object-contain" />
+        <img src={logoUrl} alt="Flow AI" className="w-8 h-5 object-contain" />
       </div>
 
       {/* Windows Window Controls (Right) */}
