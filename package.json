@@ -17,6 +17,8 @@
     "package:win": "vite build && electron-forge package --platform=win32",
     "publish": "vite build && electron-forge publish",
     "publish:github": "vite build && electron-forge publish --target=@electron-forge/publisher-github",
+    "dist": "vite build && electron-builder",
+    "dist:mac": "vite build && electron-builder --mac",
     "lint": "eslint src --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "test": "node tracker/v3/tests/test-tracker-v3.js",
     "test-tracker": "npm run test",
@@ -29,6 +31,28 @@
   "author": "LevelAI",
   "license": "UNLICENSED",
   "private": true,
+  "build": {
+    "appId": "com.flowai.desktop",
+    "productName": "Flow AI",
+    "directories": {
+      "output": "dist-electron"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "node_modules/**/*"
+    ],
+    "mac": {
+      "target": "dmg",
+      "icon": "icon.icns",
+      "category": "public.app-category.productivity",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "entitlements.plist",
+      "entitlementsInherit": "entitlements.plist",
+      "identity": "Apple Development: Idan Mann (L783NHZMX2)"
+    }
+  },
   "dependencies": {
     "@mantine/core": "^8.1.0",
     "@mantine/hooks": "^8.1.0",
@@ -52,6 +76,7 @@
     "@vitejs/plugin-react": "^4.2.0",
     "concurrently": "^8.2.2",
     "electron": "^28.3.3",
+    "electron-builder": "^24.13.3",
     "typescript": "^5.2.2",
     "vite": "^5.0.0"
   }

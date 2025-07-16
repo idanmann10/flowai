@@ -8,7 +8,13 @@ const config: ForgeConfig = {
     icon: './icon.icns',
     asar: true,
     overwrite: true,
-    name: 'Flow AI'
+    name: 'Flow AI',
+    // Signing configuration for macOS
+    osxSign: {
+      identity: 'Developer ID Application: Idan Mann (4593N79G44)',
+      entitlements: 'entitlements.plist',
+      entitlementsInherit: 'entitlements.plist'
+    }
   },
   rebuildConfig: {},
   makers: [

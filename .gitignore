@@ -16,6 +16,7 @@ build/
 .env.development.local
 .env.test.local
 .env.production.local
+.env.notarization
 
 # IDE files
 .vscode/
@@ -97,4 +98,25 @@ test-*.js
 demo-*.js
 
 # Development files
-*.tsbuildinfo 
+*.tsbuildinfo
+
+# Build artifacts and releases
+*.dmg
+*.app
+*.exe
+*.deb
+*.rpm
+*.AppImage
+*.snap
+
+# Certificates and private keys
+*.pem
+*.csr
+*.p12
+*.pfx
+*.key
+*.crt
+*.cert
+
+# Notarization files
+entitlements.plist 
