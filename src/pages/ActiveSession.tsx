@@ -169,6 +169,53 @@ const ActiveSession: React.FC = () => {
     }
   }, [handleAIResult])
 
+  // Watch for session summary modal state and navigate to completion page
+  const { showSummaryModal } = useSessionSummaryStore()
+  useEffect(() => {
+    console.log('[DEBUG][ACTIVE SESSION] showSummaryModal changed:', showSummaryModal, 'current path:', window.location.pathname)
+    
+    if (showSummaryModal && window.location.pathname !== '/session-completion') {
+      console.log('[DEBUG][ACTIVE SESSION] Summary modal triggered - navigating to completion page')
+      // Add a small delay to ensure the state is fully updated
+      setTimeout(() => {
+        console.log('[DEBUG][ACTIVE SESSION] Executing navigation to session completion')
+        navigate('/session-completion', { replace: true })
+      }, 200)
+    }
+  }, [showSummaryModal, navigate])
+
+  // Additional check for session end - listen for session summary store changes
+  useEffect(() => {
+    const checkForSessionEnd = () => {
+      const { showSummaryModal, currentSessionId, sessionDuration } = useSessionSummaryStore.getState()
+      
+      console.log('[DEBUG][ACTIVE SESSION] Periodic check:', {
+        showSummaryModal,
+        currentSessionId,
+        sessionDuration,
+        currentPath: window.location.pathname
+      })
+      
+      if (showSummaryModal && window.location.pathname !== '/session-completion') {
+        console.log('[DEBUG][ACTIVE SESSION] Found showSummaryModal true - navigating to completion')
+        navigate('/session-completion', { replace: true })
+      }
+    }
+    
+    // Check immediately
+    checkForSessionEnd()
+    
+    // Check every 500ms for the first 5 seconds after session ends
+    const interval = setInterval(checkForSessionEnd, 500)
+    
+    // Clear interval after 5 seconds
+    setTimeout(() => {
+      clearInterval(interval)
+    }, 5000)
+    
+    return () => clearInterval(interval)
+  }, [navigate])
+
   // Update real-time data every 5 seconds
   useEffect(() => {
     if (!isActive || !window.electronAPI) return
@@ -196,28 +243,8 @@ const ActiveSession: React.FC = () => {
     return () => clearInterval(interval)
   }, [isActive])
 
-  // Redirect if no active session - but only if not going to session completion
-  useEffect(() => {
-    if (!isActive) {
-      // Check if we're already on the session completion page
-      if (window.location.pathname === '/session-completion') {
-        console.log('[DEBUG][ACTIVE SESSION] Already on session completion page, not redirecting');
-        return;
-      }
-      
-      // Check if session summary store is handling the navigation
-      const { showSummaryModal } = useSessionSummaryStore.getState()
-      console.log('[DEBUG][ACTIVE SESSION] Checking redirect: isActive:', isActive, 'showSummaryModal:', showSummaryModal);
-      
-      if (!showSummaryModal) {
-        // Only redirect to dashboard if session summary store isn't handling navigation
-        console.log('[DEBUG][ACTIVE SESSION] Redirecting to dashboard');
-        navigate('/employee', { replace: true })
-      } else {
-        console.log('[DEBUG][ACTIVE SESSION] Session summary store handling navigation, not redirecting');
-      }
-    }
-  }, [isActive, navigate])
+  // No automatic redirect - let session completion flow handle navigation
+  // The session completion page will handle redirecting to dashboard after user interaction
 
   // Cleanup: Stop tracker when component unmounts
   useEffect(() => {
@@ -507,6 +534,12 @@ const ActiveSession: React.FC = () => {
       console.log('🎯 Session ended')
       console.log('📊 Session summary modal should appear automatically...')
       
+      // Force navigation to session completion after a brief delay as fallback
+      setTimeout(() => {
+        console.log('[DEBUG][ACTIVE SESSION] Fallback navigation to session completion')
+        navigate('/session-completion', { replace: true })
+      }, 1000)
+      
       // Prepare export data even if pipeline didn't collect anything
       const finalExportData = exportData || {
         sessionId: sessionId,
@@ -554,62 +587,7 @@ const ActiveSession: React.FC = () => {
     setShowOptimizedDataModal(true)
   }
 
-  const handleManualTaskCompletion = () => {
-    // Determine what to test
-    const hasIncompleteGoal = sessionGoal && !sessionGoalCompleted
-    const hasIncompleteTodos = sessionTodos && sessionTodos.some(todo => !todo.completed)
-    
-    if (hasIncompleteGoal || hasIncompleteTodos) {
-      console.log('🧪 MANUAL TEST: Simulating AI detection of completions')
-      
-      // Create a fake AI result
-      const fakeAIResult: any = {
-        timestamp: new Date().toISOString(),
-        result: {
-          completedTodos: [],
-          goalCompleted: false,
-          productivityPct: 75,
-          keyTasks: ['Manual test'],
-          summaryText: 'Manual test of completion detection'
-        }
-      }
-      
-      // Test goal completion if available
-      if (hasIncompleteGoal) {
-        fakeAIResult.result.goalCompleted = true
-        console.log('🧪 Testing goal completion:', sessionGoal)
-      }
-      
-      // Test todo completion if available
-      if (hasIncompleteTodos) {
-        const firstIncompleteTask = sessionTodos.find(todo => !todo.completed)
-        if (firstIncompleteTask) {
-          fakeAIResult.result.completedTodos = [firstIncompleteTask.text as any]
-          console.log('🧪 Testing todo completion:', firstIncompleteTask.text)
-        }
-      }
-      
-      handleAIResult(fakeAIResult)
-    } else {
-      console.log('🧪 No incomplete tasks or goals to test with')
-      
-      // Try to create test data
-      const { addTodo, setGoal } = useSessionStore.getState()
-      
-      if (!sessionGoal) {
-        setGoal('Test Goal for AI Completion')
-      }
-      
-      if (!sessionTodos || sessionTodos.length === 0) {
-        addTodo('Test Task for AI Completion')
-      }
-      
-      // Wait a moment then try again
-      setTimeout(() => {
-        handleManualTaskCompletion()
-      }, 100)
-    }
-  }
+
 
   if (!isActive) {
     return null
@@ -1655,6 +1633,8 @@ const ActiveSession: React.FC = () => {
             End Session
           </button>
         </div>
+
+
       </div>
 
       {/* End Session Confirmation Dialog */}

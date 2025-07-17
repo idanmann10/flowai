@@ -54,17 +54,48 @@ else
     exit 1
 fi
 
-# Step 3: Verify notarization
+# Step 3: Verify notarization by checking the app inside the DMG
 echo -e "${YELLOW}🔍 Step 3: Verifying notarization...${NC}"
-spctl --assess --type install "$DMG_PATH"
 
-if [ $? -eq 0 ]; then
-    echo -e "${GREEN}✅ Notarization verification passed!${NC}"
-else
-    echo -e "${RED}❌ Notarization verification failed${NC}"
+# Mount the DMG
+echo -e "${BLUE}Mounting DMG...${NC}"
+hdiutil attach "$DMG_PATH" -quiet
+
+# Find the mounted volume
+MOUNT_POINT="/Volumes/Flow AI"
+
+if [ ! -d "$MOUNT_POINT" ]; then
+    echo -e "${RED}❌ Could not find mounted DMG at $MOUNT_POINT${NC}"
     exit 1
 fi
 
-echo -e "${GREEN}🎉 Notarization completed successfully!${NC}"
-echo -e "${BLUE}Your notarized DMG is ready: $DMG_PATH${NC}"
-echo -e "${YELLOW}You can now distribute this DMG to users.${NC}" 
+# Verify the app bundle inside
+APP_PATH="$MOUNT_POINT/Flow AI.app"
+if [ ! -d "$APP_PATH" ]; then
+    echo -e "${RED}❌ Could not find app bundle at $APP_PATH${NC}"
+    hdiutil detach "$MOUNT_POINT" -quiet
+    exit 1
+fi
+
+echo -e "${BLUE}Verifying app bundle: $APP_PATH${NC}"
+spctl --assess --verbose --type exec "$APP_PATH"
+
+if [ $? -eq 0 ]; then
+    echo -e "${GREEN}✅ Notarization verification passed!${NC}"
+    VERIFICATION_SUCCESS=true
+else
+    echo -e "${RED}❌ Notarization verification failed${NC}"
+    VERIFICATION_SUCCESS=false
+fi
+
+# Unmount the DMG
+echo -e "${BLUE}Unmounting DMG...${NC}"
+hdiutil detach "$MOUNT_POINT" -quiet
+
+if [ "$VERIFICATION_SUCCESS" = true ]; then
+    echo -e "${GREEN}🎉 Notarization completed successfully!${NC}"
+    echo -e "${BLUE}Your notarized DMG is ready: $DMG_PATH${NC}"
+    echo -e "${YELLOW}You can now distribute this DMG to users.${NC}"
+else
+    exit 1
+fi 

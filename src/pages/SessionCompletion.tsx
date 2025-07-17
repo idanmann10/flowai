@@ -11,12 +11,25 @@ import {
   IconActivity,
   IconBrain,
   IconCopy,
-  IconX
+  IconX,
+  IconBulb,
+  IconChartBar
 } from '@tabler/icons-react'
 import { useSessionSummaryStore } from '../stores/sessionSummaryStore'
 import { useAuth } from '../stores/authStore'
 import { AnimatedStars } from '../components/ui'
+import { ProductivityGraph } from '../components/ProductivityGraph'
 import { notifications } from '@mantine/notifications'
+import { 
+  groupProductivityByHour, 
+  calculateOverallAIProductivity, 
+  calculateCompletedTasks,
+  getSessionProductivity,
+  formatDuration as formatDurationHelper, 
+  formatTimeOnly,
+  formatAppUsageTime,
+  AISummary 
+} from '../utils/productivityHelpers'
 import '../styles/clickup-theme.css'
 
 const SessionCompletion: React.FC = () => {
@@ -34,77 +47,423 @@ const SessionCompletion: React.FC = () => {
     loading
   } = useSessionSummaryStore()
 
+  // Add debug logging at component mount
+  console.log('🚀 SessionCompletion: Component mounted with state:', {
+    showSummaryModal,
+    currentSessionId,
+    sessionDuration,
+    aiSummariesCount: aiSummaries.length,
+    hasFinalSummary: !!finalSummary,
+    user: user?.id
+  })
+
   const [showFireworks, setShowFireworks] = useState(false)
   const [showStars, setShowStars] = useState(false)
   const [showContent, setShowContent] = useState(false)
   const [copying, setCopying] = useState(false)
   const [isDataReady, setIsDataReady] = useState(false)
+  const [sessionData, setSessionData] = useState<any>(null)
 
-  // Wait for AI data to be ready
+  // Extract completed tasks from AI summaries (same logic as SessionHistory.tsx)
+  const getCompletedTasks = (summaries: any[]) => {
+    const tasks: string[] = []
+    const taskCandidates: Array<{text: string, confidence: number, source: string}> = []
+    
+    // Helper function to normalize task text for better deduplication
+    const normalizeTask = (task: string): string => {
+      return task
+        .toLowerCase()
+        .replace(/^(the|a|an)\s+/i, '') // Remove articles
+        .replace(/\s+/g, ' ') // Normalize whitespace
+        .replace(/[^\w\s]/g, '') // Remove punctuation
+        .trim()
+    }
+    
+    // Helper function to check if tasks are similar (for deduplication)
+    const isSimilarTask = (task1: string, task2: string): boolean => {
+      const norm1 = normalizeTask(task1)
+      const norm2 = normalizeTask(task2)
+      
+      // Check for exact match after normalization
+      if (norm1 === norm2) return true
+      
+      // Check if one is contained within the other (with some tolerance)
+      if (norm1.includes(norm2) && norm2.length > 10) return true
+      if (norm2.includes(norm1) && norm1.length > 10) return true
+      
+      // Check for high similarity (80%+ of words match)
+      const words1 = norm1.split(' ').filter(w => w.length > 2)
+      const words2 = norm2.split(' ').filter(w => w.length > 2)
+      const commonWords = words1.filter(w => words2.includes(w))
+      const similarity = commonWords.length / Math.max(words1.length, words2.length)
+      
+      return similarity > 0.8
+    }
+    
+    summaries.forEach(summary => {
+      // Priority 1: Direct task completion data from AI summaries
+      if (summary.task_completion?.completed) {
+        summary.task_completion.completed.forEach((task: string) => {
+          taskCandidates.push({text: task, confidence: 0.95, source: 'ai_direct'})
+        })
+      }
+      
+      // Priority 2: Extract tasks from summary text with improved patterns
+      if (summary.summary_text) {
+        const text = summary.summary_text.toLowerCase()
+        
+        // Pattern 1: "completed [task]" or "finished [task]"
+        const completedMatches = text.match(/(?:completed|finished|done with|accomplished)\s+([^.!?]+)/gi)
+        if (completedMatches) {
+          completedMatches.forEach((match: string) => {
+            const task = match.replace(/^(completed|finished|done with|accomplished)\s+/i, '').trim()
+            if (task.length > 3 && task.length < 100) {
+              taskCandidates.push({text: task, confidence: 0.9, source: 'ai_completed'})
+            }
+          })
+        }
+        
+        // Pattern 2: "✓ [task]" or "✅ [task]"
+        const checkMatches = text.match(/[✓✅]\s*([^.!?\n]+)/gi)
+        if (checkMatches) {
+          checkMatches.forEach((match: string) => {
+            const task = match.replace(/^[✓✅]\s*/, '').trim()
+            if (task.length > 3 && task.length < 100) {
+              taskCandidates.push({text: task, confidence: 0.95, source: 'ai_checkmark'})
+            }
+          })
+        }
+      }
+    })
+    
+    // Sort by confidence and remove duplicates
+    const sortedCandidates = taskCandidates
+      .sort((a, b) => b.confidence - a.confidence)
+    
+    const uniqueTasks: string[] = []
+    
+    sortedCandidates.forEach(candidate => {
+      // Check if this task is similar to any already added task
+      const isDuplicate = uniqueTasks.some(existingTask => 
+        isSimilarTask(candidate.text, existingTask)
+      )
+      
+      if (!isDuplicate) {
+        // Clean up the task text
+        const cleanedTask = candidate.text
+          .replace(/^(the|a|an)\s+/i, '') // Remove articles
+          .replace(/\s+/g, ' ') // Normalize whitespace
+          .trim()
+        
+        if (cleanedTask.length > 3 && cleanedTask.length < 100) {
+          uniqueTasks.push(cleanedTask)
+        }
+      }
+    })
+    
+    return uniqueTasks.slice(0, 10) // Limit to 10 most relevant tasks
+  }
+
+  // Generate intelligent recommendations based on session data (same logic as SessionHistory.tsx)
+  const generateRecommendations = (sessionData: any, summaries: any[]) => {
+    const recommendations: string[] = []
+    
+    // Priority 1: Use AI-generated recommendations from the database
+    if (sessionData?.recommendations && sessionData.recommendations.length > 0) {
+      recommendations.push(...sessionData.recommendations)
+    }
+    
+    // Priority 2: Extract recommendations from AI summaries
+    const aiSuggestions: string[] = []
+    summaries.forEach(summary => {
+      if (summary.suggestions && summary.suggestions.length > 0) {
+        aiSuggestions.push(...summary.suggestions)
+      }
+      
+      // Extract recommendations from summary text
+      if (summary.summary_text) {
+        const text = summary.summary_text.toLowerCase()
+        
+        // Look for specific AI recommendation patterns
+        if (text.includes('recommend') || text.includes('suggest')) {
+          const sentences = summary.summary_text.split(/[.!?]+/)
+          sentences.forEach((sentence: string) => {
+            const cleanSentence = sentence.trim()
+            if (cleanSentence.length > 20 && cleanSentence.length < 150 && 
+                (cleanSentence.toLowerCase().includes('recommend') || 
+                 cleanSentence.toLowerCase().includes('suggest'))) {
+              aiSuggestions.push(cleanSentence)
+            }
+          })
+        }
+      }
+    })
+    
+    // Add unique AI suggestions
+    const uniqueAiSuggestions = [...new Set(aiSuggestions)].slice(0, 3)
+    recommendations.push(...uniqueAiSuggestions)
+    
+    // Return unique recommendations, prioritizing AI ones
+    return [...new Set(recommendations)].slice(0, 4)
+  }
+
+  // Wait for AI data to be ready with enhanced checking
   useEffect(() => {
     if (showSummaryModal && currentSessionId) {
-      // Check if we have real AI data
+      // Check if we have comprehensive AI data OR final summary
       const hasRealData = aiSummaries.length > 0 || finalSummary
       
       if (hasRealData && !loading) {
-        console.log('✅ Session completion: Real AI data is ready')
+        console.log('✅ Session completion: Data is ready, processing insights...', {
+          aiSummariesCount: aiSummaries.length,
+          hasFinalSummary: !!finalSummary,
+          finalSummaryData: finalSummary
+        })
+        
+        // Extract productivity score from available sources
+        const getProductivityScore = () => {
+          // Priority 1: AI summaries average
+          if (aiSummaries.length > 0) {
+            const score = calculateOverallAIProductivity(aiSummaries as AISummary[])
+            console.log('🔍 SessionCompletion: Using AI summaries productivity:', score)
+            return score
+          }
+          
+          // Priority 2: Final summary AI productivity score
+          if (finalSummary?.ai_productivity_score) {
+            console.log('🔍 SessionCompletion: Using final summary ai_productivity_score:', finalSummary.ai_productivity_score)
+            return finalSummary.ai_productivity_score
+          }
+          
+          // Priority 3: Final summary productivity score
+          if (finalSummary?.productivity_score) {
+            console.log('🔍 SessionCompletion: Using final summary productivity_score:', finalSummary.productivity_score)
+            return finalSummary.productivity_score
+          }
+          
+          // Priority 4: Extract from summary text (e.g., "65% productivity")
+          if (finalSummary?.final_summary || finalSummary?.summary) {
+            const summaryText = finalSummary.final_summary || finalSummary.summary
+            console.log('🔍 SessionCompletion: Extracting from summary text:', summaryText)
+            const productivityMatch = summaryText.match(/(\d+)%\s*productivity/i)
+            if (productivityMatch) {
+              const extractedScore = parseInt(productivityMatch[1])
+              console.log('🔍 SessionCompletion: Extracted productivity score:', extractedScore)
+              return extractedScore
+            }
+          }
+          
+          console.log('🔍 SessionCompletion: No productivity score found, using 0')
+          return 0
+        }
+        
+        // Extract completed tasks from available sources
+        const getCompletedTasksData = () => {
+          const tasks = []
+          let count = 0
+          
+          // From AI summaries
+          if (aiSummaries.length > 0) {
+            const aiTasks = getCompletedTasks(aiSummaries)
+            tasks.push(...aiTasks)
+            count = calculateCompletedTasks(aiSummaries as AISummary[])
+          }
+          
+          // From final summary
+          if (finalSummary?.completed_tasks?.length > 0) {
+            tasks.push(...finalSummary.completed_tasks)
+            count = Math.max(count, finalSummary.completed_tasks.length)
+          }
+          
+          // From key accomplishments (as fallback)
+          if (finalSummary?.key_accomplishments?.length > 0 && tasks.length === 0) {
+            tasks.push(...finalSummary.key_accomplishments)
+            count = Math.max(count, finalSummary.key_accomplishments.length)
+          }
+          
+          return { tasks: [...new Set(tasks)], count }
+        }
+        
+        // Get recommendations from available sources
+        const getRecommendationsData = () => {
+          const recommendations = []
+          
+          // From final summary
+          if (finalSummary?.recommendations?.length > 0) {
+            recommendations.push(...finalSummary.recommendations)
+          }
+          
+          // From AI summaries
+          if (aiSummaries.length > 0) {
+            const aiRecommendations = generateRecommendations(finalSummary, aiSummaries)
+            recommendations.push(...aiRecommendations)
+          }
+          
+          // Generate basic recommendations if none available
+          if (recommendations.length === 0 && finalSummary) {
+            const score = getProductivityScore()
+            if (finalSummary.improvement === 'declined') {
+              recommendations.push('💡 Consider breaking tasks into smaller, manageable chunks')
+            }
+            if (score >= 80) {
+              recommendations.push('🚀 Excellent focus! Try maintaining this productivity level')
+            } else if (score < 50) {
+              recommendations.push('📚 Try the Pomodoro technique for better focus sessions')
+            }
+          }
+          
+          return [...new Set(recommendations)].slice(0, 4)
+        }
+        
+        const completedTasksData = getCompletedTasksData()
+        const productivityScore = getProductivityScore()
+        
+        // Process comprehensive session data
+        const processedData = {
+          duration: sessionDuration,
+          aiSummaries: aiSummaries as AISummary[],
+          finalSummary,
+          // Use calculated productivity score
+          overallProductivity: productivityScore,
+          completedTasksCount: completedTasksData.count,
+          completedTasks: completedTasksData.tasks,
+          recommendations: getRecommendationsData(),
+          hourlyProductivity: aiSummaries.length > 0 ? groupProductivityByHour(aiSummaries as AISummary[]) : [],
+          // Add improvement data from final summary
+          improvementTrend: finalSummary?.improvement,
+          improvementPercentage: finalSummary?.improvementPercentage
+        }
+        
+        setSessionData(processedData)
         setIsDataReady(true)
+        console.log('✅ Session data processed:', processedData)
       } else {
-        console.log('⏳ Session completion: Waiting for AI data...', {
+        console.log('⏳ Session completion: Waiting for data...', {
           aiSummariesCount: aiSummaries.length,
           hasFinalSummary: !!finalSummary,
           loading
         })
         
-        // Poll for data every 2 seconds
+        // Enhanced polling for comprehensive data
         const pollInterval = setInterval(() => {
-          const { aiSummaries: currentSummaries, finalSummary: currentFinal, loading: currentLoading } = useSessionSummaryStore.getState()
+          const { 
+            aiSummaries: currentSummaries, 
+            finalSummary: currentFinal, 
+            loading: currentLoading 
+          } = useSessionSummaryStore.getState()
+          
           const hasData = currentSummaries.length > 0 || currentFinal
           
           if (hasData && !currentLoading) {
-            console.log('✅ Session completion: AI data became available')
+            console.log('✅ Session completion: Data became available')
+            
+            // Use the same processing logic
+            const getProductivityScore = () => {
+              if (currentSummaries.length > 0) {
+                return calculateOverallAIProductivity(currentSummaries as AISummary[])
+              }
+              if (currentFinal?.ai_productivity_score) {
+                return currentFinal.ai_productivity_score
+              }
+              if (currentFinal?.productivity_score) {
+                return currentFinal.productivity_score
+              }
+              if (currentFinal?.final_summary || currentFinal?.summary) {
+                const summaryText = currentFinal.final_summary || currentFinal.summary
+                const productivityMatch = summaryText.match(/(\d+)%\s*productivity/i)
+                if (productivityMatch) {
+                  return parseInt(productivityMatch[1])
+                }
+              }
+              return 0
+            }
+            
+            const processedData = {
+              duration: sessionDuration,
+              aiSummaries: currentSummaries as AISummary[],
+              finalSummary: currentFinal,
+              overallProductivity: getProductivityScore(),
+              completedTasksCount: currentSummaries.length > 0 ? calculateCompletedTasks(currentSummaries as AISummary[]) : (currentFinal?.completed_tasks?.length || 0),
+              completedTasks: currentSummaries.length > 0 ? getCompletedTasks(currentSummaries) : (currentFinal?.completed_tasks || []),
+              recommendations: currentSummaries.length > 0 ? generateRecommendations(currentFinal, currentSummaries) : (currentFinal?.recommendations || []),
+              hourlyProductivity: currentSummaries.length > 0 ? groupProductivityByHour(currentSummaries as AISummary[]) : [],
+              improvementTrend: currentFinal?.improvement,
+              improvementPercentage: currentFinal?.improvementPercentage
+            }
+            
+            setSessionData(processedData)
             setIsDataReady(true)
             clearInterval(pollInterval)
           }
-        }, 2000)
+        }, 1000) // Check every second instead of every 2 seconds
         
-        // Cleanup after 30 seconds to avoid infinite polling
+        // Reduced timeout to 15 seconds since we should have finalSummary quickly
         setTimeout(() => {
           clearInterval(pollInterval)
           if (!isDataReady) {
-            console.log('⚠️ Session completion: Timeout waiting for AI data, showing with available data')
+            console.log('⚠️ Session completion: Timeout, using available data')
+            
+            // Create basic data from what we have
+            const basicProductivity = finalSummary?.ai_productivity_score || finalSummary?.productivity_score || 0
+            
+            setSessionData({
+              duration: sessionDuration,
+              aiSummaries: [],
+              finalSummary: finalSummary,
+              overallProductivity: basicProductivity,
+              completedTasksCount: finalSummary?.completed_tasks?.length || 0,
+              completedTasks: finalSummary?.completed_tasks || [],
+              recommendations: finalSummary?.recommendations || [],
+              hourlyProductivity: [],
+              improvementTrend: finalSummary?.improvement,
+              improvementPercentage: finalSummary?.improvementPercentage
+            })
             setIsDataReady(true)
           }
-        }, 30000)
-        
-        // Also check if we have at least some basic session data
-        const hasBasicData = sessionDuration > 0 || sessionStartTime
-        if (hasBasicData && !isDataReady) {
-          console.log('✅ Session completion: Basic session data available, proceeding')
-          setTimeout(() => setIsDataReady(true), 5000) // Show after 5 seconds even without AI data
-        }
+        }, 15000)
         
         return () => clearInterval(pollInterval)
       }
+    } else {
+      // FALLBACK: No data available - show basic session completion immediately
+      console.log('🚀 SessionCompletion: No data available, showing fallback immediately')
+      setSessionData({
+        duration: sessionDuration,
+        aiSummaries: [],
+        finalSummary: null,
+        overallProductivity: 0,
+        completedTasksCount: 0,
+        completedTasks: [],
+        recommendations: [
+          '💡 This was a short session - try longer sessions for better AI analysis',
+          '📊 Set specific goals for your next session',
+          '⏰ Consider using the Pomodoro technique for focused work'
+        ],
+        hourlyProductivity: [],
+        improvementTrend: null,
+        improvementPercentage: null,
+        isFallback: true // Flag to show this is a fallback
+      })
+      setIsDataReady(true)
     }
-  }, [showSummaryModal, currentSessionId, aiSummaries.length, finalSummary, loading])
+  }, [showSummaryModal, currentSessionId, aiSummaries.length, finalSummary, loading, sessionDuration])
 
   // Animation sequence - only start when data is ready
   useEffect(() => {
-    if (showSummaryModal && isDataReady) {
+    if (showSummaryModal && isDataReady && sessionData) {
       // Start animation sequence
       setTimeout(() => setShowStars(true), 500)
       setTimeout(() => setShowContent(true), 1000)
       
       // Show fireworks if they did well (3 stars or high productivity)
-      const score = finalSummary?.ai_productivity_score || finalSummary?.productivity_score || 0
+      const score = sessionData.overallProductivity || finalSummary?.ai_productivity_score || finalSummary?.productivity_score || 0
       const stars = finalSummary?.stars || 0
       
       if (stars >= 3 || score >= 80) {
         setTimeout(() => setShowFireworks(true), 1500)
       }
     }
-  }, [showSummaryModal, isDataReady, finalSummary])
+  }, [showSummaryModal, isDataReady, sessionData, finalSummary])
 
   const formatDuration = (seconds: number) => {
     const hours = Math.floor(seconds / 3600)
@@ -141,10 +500,15 @@ const SessionCompletion: React.FC = () => {
   }
 
   const getPerformanceMessage = () => {
-    if (!finalSummary) return 'Great session!'
+    if (!sessionData && !finalSummary) return 'Great session!'
     
-    const score = finalSummary.ai_productivity_score || finalSummary.productivity_score || 0
-    const stars = finalSummary.stars || 0
+    // Check for short sessions first
+    if (sessionDuration < 600) {
+      return 'Session Too Short ⚠️'
+    }
+    
+    const score = sessionData?.overallProductivity || finalSummary?.ai_productivity_score || finalSummary?.productivity_score || 0
+    const stars = finalSummary?.stars || 0
     
     if (stars >= 3 || score >= 80) return 'Outstanding performance! 🚀'
     if (stars >= 2 || score >= 60) return 'Excellent work! 💪'
@@ -153,10 +517,15 @@ const SessionCompletion: React.FC = () => {
   }
 
   const getMotivationalEmoji = () => {
-    if (!finalSummary) return '🎯'
+    if (!sessionData && !finalSummary) return '🎯'
     
-    const score = finalSummary.ai_productivity_score || finalSummary.productivity_score || 0
-    const stars = finalSummary.stars || 0
+    // Check for short sessions first
+    if (sessionDuration < 600) {
+      return '⚠️'
+    }
+    
+    const score = sessionData?.overallProductivity || finalSummary?.ai_productivity_score || finalSummary?.productivity_score || 0
+    const stars = finalSummary?.stars || 0
     
     if (stars >= 3 || score >= 80) return '🏆'
     if (stars >= 2 || score >= 60) return '⭐'
@@ -164,9 +533,93 @@ const SessionCompletion: React.FC = () => {
     return '📊'
   }
 
-  if (!showSummaryModal) {
-    return null
+  const getProductivityColor = (score: number) => {
+    if (score >= 80) return 'var(--success-color)'
+    if (score >= 60) return 'var(--warning-color)'
+    return 'var(--error-color)'
   }
+
+  if (!showSummaryModal) {
+    console.log('🚀 SessionCompletion: Component rendered but showSummaryModal is false - showing test message')
+    return (
+      <div style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        background: 'linear-gradient(135deg, #1a1a1a 0%, #2a2a2a 100%)',
+        zIndex: 9999,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '20px'
+      }}>
+        <div style={{
+          background: 'var(--bg-primary)',
+          borderRadius: '16px',
+          border: '1px solid var(--border-color)',
+          padding: '32px',
+          textAlign: 'center',
+          maxWidth: '600px'
+        }}>
+          <h1 style={{ color: 'white', marginBottom: '16px' }}>
+            🚀 SessionCompletion Route Working!
+          </h1>
+          <p style={{ color: '#cccccc', marginBottom: '16px' }}>
+            The route is accessible, but showSummaryModal is false.
+          </p>
+          <div style={{ 
+            background: 'var(--warning-color)10', 
+            border: '1px solid var(--warning-color)30',
+            borderRadius: '8px',
+            padding: '16px',
+            marginBottom: '16px'
+          }}>
+            <p style={{ color: 'var(--warning-color)', margin: 0 }}>
+              Debug Info:
+            </p>
+            <p style={{ color: '#cccccc', fontSize: '12px', margin: '8px 0 0 0' }}>
+              showSummaryModal: {showSummaryModal.toString()}<br/>
+              currentSessionId: {currentSessionId || 'null'}<br/>
+              sessionDuration: {sessionDuration}<br/>
+              aiSummaries: {aiSummaries.length}<br/>
+              hasFinalSummary: {!!finalSummary}
+            </p>
+          </div>
+          <button 
+            onClick={() => navigate('/employee')}
+            style={{
+              background: 'var(--accent-purple)',
+              color: 'white',
+              border: 'none',
+              padding: '12px 24px',
+              borderRadius: '8px',
+              cursor: 'pointer'
+            }}
+          >
+            Go to Dashboard
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  // Add debug logging to confirm this component is rendering
+  console.log('🚀 SessionCompletion: Rendering with data:', {
+    isDataReady,
+    sessionData: sessionData ? {
+      overallProductivity: sessionData.overallProductivity,
+      completedTasksCount: sessionData.completedTasksCount,
+      duration: sessionData.duration
+    } : null,
+    finalSummary: finalSummary ? {
+      stars: finalSummary.stars,
+      summary: finalSummary.summary || finalSummary.final_summary,
+      ai_productivity_score: finalSummary.ai_productivity_score,
+      productivity_score: finalSummary.productivity_score
+    } : null
+  })
 
   // Show loading state while waiting for AI data
   if (!isDataReady) {
@@ -199,52 +652,75 @@ const SessionCompletion: React.FC = () => {
           
           <h1 style={{
             fontSize: '32px',
-            fontWeight: '700',
+            fontWeight: 'bold',
             color: 'white',
-            margin: '0 0 16px 0'
+            marginBottom: '16px',
+            background: 'linear-gradient(135deg, var(--accent-purple), var(--accent-blue))',
+            WebkitBackgroundClip: 'text',
+            WebkitTextFillColor: 'transparent'
           }}>
             Processing Session Data
           </h1>
           
           <p style={{
             fontSize: '18px',
-            color: 'rgba(255, 255, 255, 0.7)',
-            margin: '0 0 24px 0'
+            color: '#cccccc',
+            marginBottom: '32px',
+            maxWidth: '600px',
+            lineHeight: '1.6'
           }}>
-            AI is analyzing your session and generating insights...
+            Our AI is analyzing your session data to generate comprehensive insights, 
+            completed tasks, and personalized recommendations...
           </p>
           
           <div style={{
             display: 'flex',
-            alignItems: 'center',
+            gap: '16px',
             justifyContent: 'center',
-            gap: '8px',
-            fontSize: '14px',
-            color: 'rgba(255, 255, 255, 0.5)'
+            flexWrap: 'wrap',
+            marginBottom: '24px'
           }}>
             <div style={{
-              width: '12px',
-              height: '12px',
-              borderRadius: '50%',
-              background: '#7b68ee',
-              animation: 'pulse 1.5s infinite'
-            }} />
-            <span>Collecting AI summaries...</span>
+              background: 'rgba(123, 104, 238, 0.2)',
+              border: '1px solid rgba(123, 104, 238, 0.3)',
+              borderRadius: '12px',
+              padding: '12px 20px',
+              color: '#7b68ee'
+            }}>
+              📊 {aiSummaries.length} AI summaries
+            </div>
+            <div style={{
+              background: 'rgba(76, 175, 80, 0.2)',
+              border: '1px solid rgba(76, 175, 80, 0.3)',
+              borderRadius: '12px',
+              padding: '12px 20px',
+              color: '#4caf50'
+            }}>
+              ⏱️ {sessionDuration ? formatDuration(sessionDuration) : '--:--:--'}
+            </div>
+            <div style={{
+              background: 'rgba(255, 193, 7, 0.2)',
+              border: '1px solid rgba(255, 193, 7, 0.3)',
+              borderRadius: '12px',
+              padding: '12px 20px',
+              color: '#ffc107'
+            }}>
+              {finalSummary ? '✅ Final summary ready' : '⏳ Generating summary...'}
+            </div>
+          </div>
+          
+          <div style={{
+            fontSize: '14px',
+            color: '#888888'
+          }}>
+            This usually takes just a few seconds...
           </div>
         </div>
-        
-        <style dangerouslySetInnerHTML={{
-          __html: `
-            @keyframes pulse {
-              0%, 100% { opacity: 1; }
-              50% { opacity: 0.5; }
-            }
-          `
-        }} />
       </div>
     )
   }
 
+  // Main session completion modal with comprehensive data
   return (
     <div style={{
       position: 'fixed',
@@ -254,607 +730,468 @@ const SessionCompletion: React.FC = () => {
       bottom: 0,
       background: 'linear-gradient(135deg, #1a1a1a 0%, #2a2a2a 100%)',
       zIndex: 9999,
-      overflow: 'auto'
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: '20px'
     }}>
-      {/* Fireworks Animation */}
-      {showFireworks && (
-        <div style={{
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          pointerEvents: 'none',
-          zIndex: 1
-        }}>
-          {[...Array(20)].map((_, i) => (
-            <div
-              key={i}
-              style={{
-                position: 'absolute',
-                left: `${Math.random() * 100}%`,
-                top: `${Math.random() * 100}%`,
-                width: '4px',
-                height: '4px',
-                background: ['#FFD700', '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4'][Math.floor(Math.random() * 5)],
-                borderRadius: '50%',
-                animation: `firework ${2 + Math.random() * 2}s ease-out forwards`,
-                animationDelay: `${Math.random() * 2}s`
-              }}
-            />
-          ))}
-        </div>
-      )}
-
-      {/* Main Content */}
       <div style={{
-        position: 'relative',
-        zIndex: 2,
-        minHeight: '100vh',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '40px 20px'
+        background: 'var(--bg-primary)',
+        borderRadius: '16px',
+        border: '1px solid var(--border-color)',
+        maxWidth: '1200px',
+        width: '100%',
+        maxHeight: '95vh',
+        overflow: 'auto',
+        position: 'relative'
       }}>
-        {/* Header */}
-        <div style={{
-          textAlign: 'center',
-          marginBottom: '40px',
-          opacity: showContent ? 1 : 0,
-          transform: showContent ? 'translateY(0)' : 'translateY(20px)',
-          transition: 'all 0.8s ease'
-        }}>
+        {/* Fireworks effect */}
+        {showFireworks && (
           <div style={{
-            fontSize: '80px',
-            marginBottom: '20px',
-            animation: showStars ? 'bounce 1s ease' : 'none'
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            pointerEvents: 'none',
+            zIndex: 1
           }}>
-            {getMotivationalEmoji()}
-          </div>
-          
-          <h1 style={{
-            fontSize: '48px',
-            fontWeight: '700',
-            color: 'white',
-            margin: '0 0 16px 0',
-            background: 'linear-gradient(135deg, #7b68ee, #a78bfa)',
-            WebkitBackgroundClip: 'text',
-            WebkitTextFillColor: 'transparent'
-          }}>
-            SESSION COMPLETE!
-          </h1>
-          
-          <p style={{
-            fontSize: '24px',
-            color: 'rgba(255, 255, 255, 0.8)',
-            margin: 0
-          }}>
-            {getPerformanceMessage()}
-          </p>
-        </div>
-
-        {/* Enhanced Stars Rating with Pop Animation */}
-        <div style={{
-          marginBottom: '40px',
-          opacity: showStars ? 1 : 0,
-          transform: showStars ? 'scale(1)' : 'scale(0.5)',
-          transition: 'all 0.6s ease'
-        }}>
-          <div style={{
-            display: 'flex',
-            gap: '12px',
-            justifyContent: 'center',
-            alignItems: 'center'
-          }}>
-            {[1, 2, 3].map(star => (
+            {[...Array(6)].map((_, i) => (
               <div
-                key={star}
+                key={i}
                 style={{
-                  fontSize: '48px',
-                  color: star <= (finalSummary?.stars || 0) ? '#FFD700' : '#444',
-                  filter: star <= (finalSummary?.stars || 0) ? 'drop-shadow(0 0 12px #FFD700)' : 'none',
-                  transition: 'all 0.3s ease',
-                  animation: star <= (finalSummary?.stars || 0) && showStars ? 
-                    `starPop 0.8s ease ${star * 0.3}s` : 'none',
-                  transform: star <= (finalSummary?.stars || 0) ? 'scale(1.1)' : 'scale(1)',
-                  cursor: 'default'
+                  position: 'absolute',
+                  fontSize: '24px',
+                  animation: `firework 2s ease-out ${i * 0.2}s`,
+                  left: `${20 + (i * 15)}%`,
+                  top: `${20 + (i % 3) * 20}%`
                 }}
               >
-                ⭐
+                🎆
               </div>
             ))}
           </div>
-          {finalSummary?.stars && (
-            <div style={{
-              textAlign: 'center',
-              marginTop: '16px',
-              fontSize: '16px',
-              color: 'rgba(255, 255, 255, 0.8)',
-              fontWeight: '600'
-            }}>
-              {finalSummary.stars === 3 ? 'Outstanding!' : 
-               finalSummary.stars === 2 ? 'Great Work!' : 
-               finalSummary.stars === 1 ? 'Good Job!' : 'Keep Going!'}
-            </div>
-          )}
-        </div>
-
-        {/* Session Stats Grid */}
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-          gap: '20px',
-          maxWidth: '900px',
-          width: '100%',
-          marginBottom: '40px',
-          opacity: showContent ? 1 : 0,
-          transform: showContent ? 'translateY(0)' : 'translateY(30px)',
-          transition: 'all 0.8s ease 0.2s'
-        }}>
-          <div style={{
-            background: 'rgba(123, 104, 238, 0.1)',
-            border: '1px solid rgba(123, 104, 238, 0.3)',
-            borderRadius: '16px',
-            padding: '20px',
-            textAlign: 'center'
-          }}>
-            <IconClock size={28} style={{ color: '#7b68ee', marginBottom: '12px' }} />
-            <div style={{ fontSize: '24px', fontWeight: '700', color: 'white', marginBottom: '8px' }}>
-              {sessionDuration ? formatDuration(sessionDuration) : '--'}
-            </div>
-            <div style={{ fontSize: '13px', color: 'rgba(255, 255, 255, 0.7)' }}>
-              Total Time
-            </div>
-          </div>
-          
-          <div style={{
-            background: 'rgba(76, 175, 80, 0.1)',
-            border: '1px solid rgba(76, 175, 80, 0.3)',
-            borderRadius: '16px',
-            padding: '20px',
-            textAlign: 'center'
-          }}>
-            <IconTrendingUp size={28} style={{ color: '#4caf50', marginBottom: '12px' }} />
-            <div style={{ fontSize: '24px', fontWeight: '700', color: 'white', marginBottom: '8px' }}>
-              {finalSummary?.ai_productivity_score || finalSummary?.productivity_score || '--'}%
-            </div>
-            <div style={{ fontSize: '13px', color: 'rgba(255, 255, 255, 0.7)' }}>
-              Productivity Score
-            </div>
-          </div>
-          
-          <div style={{
-            background: 'rgba(255, 152, 0, 0.1)',
-            border: '1px solid rgba(255, 152, 0, 0.3)',
-            borderRadius: '16px',
-            padding: '20px',
-            textAlign: 'center'
-          }}>
-            <IconActivity size={28} style={{ color: '#ff9800', marginBottom: '12px' }} />
-            <div style={{ fontSize: '24px', fontWeight: '700', color: 'white', marginBottom: '8px' }}>
-              {(() => {
-                // Calculate average energy level from AI summaries
-                const energyLevels = aiSummaries
-                  .map(s => s.energyLevel)
-                  .filter(e => e !== undefined && e !== null);
-                
-                if (energyLevels.length > 0) {
-                  const avgEnergy = energyLevels.reduce((sum, level) => sum + level, 0) / energyLevels.length;
-                  return Math.round(avgEnergy) + '%';
-                }
-                
-                // Fallback to engagement score or default
-                if (finalSummary?.engagement_score) {
-                  return Math.round(finalSummary.engagement_score) + '%';
-                }
-                
-                return '--';
-              })()}
-            </div>
-            <div style={{ fontSize: '13px', color: 'rgba(255, 255, 255, 0.7)' }}>
-              Energy Level
-            </div>
-          </div>
-
-          <div style={{
-            background: 'rgba(52, 152, 219, 0.1)',
-            border: '1px solid rgba(52, 152, 219, 0.3)',
-            borderRadius: '16px',
-            padding: '20px',
-            textAlign: 'center'
-          }}>
-            <IconTarget size={28} style={{ color: '#3498db', marginBottom: '12px' }} />
-            <div style={{ fontSize: '24px', fontWeight: '700', color: 'white', marginBottom: '8px' }}>
-              {(() => {
-                let totalCompleted = 0;
-                
-                // Count from final summary
-                if (finalSummary?.completed_tasks?.length) {
-                  totalCompleted += finalSummary.completed_tasks.length;
-                }
-                
-                // Count from AI summaries
-                aiSummaries.forEach(summary => {
-                  if (summary.task_completion?.completed) {
-                    totalCompleted += summary.task_completion.completed.length;
-                  }
-                });
-                
-                return totalCompleted;
-              })()}
-            </div>
-            <div style={{ fontSize: '13px', color: 'rgba(255, 255, 255, 0.7)' }}>
-              Tasks Completed
-            </div>
-          </div>
-          
-          <div style={{
-            background: 'rgba(255, 193, 7, 0.1)',
-            border: '1px solid rgba(255, 193, 7, 0.3)',
-            borderRadius: '16px',
-            padding: '20px',
-            textAlign: 'center'
-          }}>
-            <IconSparkles size={28} style={{ color: '#ffc107', marginBottom: '12px' }} />
-            <div style={{ fontSize: '24px', fontWeight: '700', color: 'white', marginBottom: '8px' }}>
-              {aiSummaries.length}
-            </div>
-            <div style={{ fontSize: '13px', color: 'rgba(255, 255, 255, 0.7)' }}>
-              AI Intervals
-            </div>
-          </div>
-        </div>
-
-        {/* AI Summary */}
-        {finalSummary?.final_summary && (
-          <div style={{
-            background: 'rgba(255, 255, 255, 0.05)',
-            border: '1px solid rgba(255, 255, 255, 0.1)',
-            borderRadius: '20px',
-            padding: '32px',
-            maxWidth: '800px',
-            width: '100%',
-            marginBottom: '40px',
-            opacity: showContent ? 1 : 0,
-            transform: showContent ? 'translateY(0)' : 'translateY(30px)',
-            transition: 'all 0.8s ease 0.4s'
-          }}>
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '12px',
-              marginBottom: '20px'
-            }}>
-              <IconBrain size={24} style={{ color: '#7b68ee' }} />
-              <h3 style={{
-                margin: 0,
-                color: 'white',
-                fontSize: '20px',
-                fontWeight: '600'
-              }}>
-                AI Session Analysis
-              </h3>
-            </div>
-            <p style={{
-              margin: 0,
-              color: 'rgba(255, 255, 255, 0.9)',
-              lineHeight: '1.6',
-              fontSize: '16px'
-            }}>
-              {finalSummary.final_summary}
-            </p>
-          </div>
         )}
 
-        {/* Accomplishments and Completed Tasks */}
-        {(finalSummary?.key_accomplishments?.length > 0 || finalSummary?.completed_tasks?.length > 0 || aiSummaries.length > 0) && (
-          <div style={{
-            background: 'rgba(46, 204, 113, 0.08)',
-            border: '1px solid rgba(46, 204, 113, 0.2)',
-            borderRadius: '20px',
-            padding: '32px',
-            maxWidth: '800px',
-            width: '100%',
-            marginBottom: '40px',
-            opacity: showContent ? 1 : 0,
-            transform: showContent ? 'translateY(0)' : 'translateY(30px)',
-            transition: 'all 0.8s ease 0.5s'
-          }}>
-            <div style={{
+        {/* Header */}
+        <div style={{
+          background: 'linear-gradient(135deg, var(--accent-purple), var(--accent-blue))',
+          padding: '32px',
+          textAlign: 'center',
+          borderRadius: '16px 16px 0 0',
+          position: 'relative'
+        }}>
+          <button
+            onClick={handleContinue}
+            style={{
+              position: 'absolute',
+              top: '16px',
+              right: '16px',
+              background: 'rgba(255, 255, 255, 0.2)',
+              border: 'none',
+              borderRadius: '50%',
+              width: '40px',
+              height: '40px',
               display: 'flex',
               alignItems: 'center',
-              gap: '12px',
-              marginBottom: '24px'
-            }}>
-              <IconCheck size={24} style={{ color: '#2ecc71' }} />
-              <h3 style={{
-                margin: 0,
-                color: 'white',
-                fontSize: '20px',
-                fontWeight: '600'
-              }}>
-                What You Accomplished
-              </h3>
-            </div>
-            
-            {/* Key Accomplishments from Final Summary */}
-            {finalSummary?.key_accomplishments?.length > 0 && (
-              <div style={{ marginBottom: '24px' }}>
-                <h4 style={{
-                  color: '#2ecc71',
-                  fontSize: '16px',
-                  margin: '0 0 12px 0',
-                  fontWeight: '600'
-                }}>
-                  🎯 Key Accomplishments
-                </h4>
-                <ul style={{
-                  margin: 0,
-                  paddingLeft: '20px',
-                  color: 'rgba(255, 255, 255, 0.9)'
-                }}>
-                  {finalSummary.key_accomplishments.map((accomplishment: string, index: number) => (
-                    <li key={index} style={{
-                      marginBottom: '8px',
-                      lineHeight: '1.5'
-                    }}>
-                      {accomplishment}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
+              justifyContent: 'center',
+              cursor: 'pointer',
+              color: 'white',
+              fontSize: '20px',
+              transition: 'background-color 0.2s'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.3)'
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.2)'
+            }}
+          >
+            ✕
+          </button>
 
-            {/* Completed Tasks from Final Summary */}
-            {finalSummary?.completed_tasks?.length > 0 && (
-              <div style={{ marginBottom: '24px' }}>
-                <h4 style={{
-                  color: '#27ae60',
-                  fontSize: '16px',
-                  margin: '0 0 12px 0',
-                  fontWeight: '600'
+          <div style={{
+            fontSize: '64px',
+            marginBottom: '16px',
+            opacity: showStars ? 1 : 0,
+            transform: showStars ? 'scale(1)' : 'scale(0.8)',
+            transition: 'all 0.5s ease'
+          }}>
+            {getMotivationalEmoji()}
+          </div>
+
+          <h1 style={{
+            fontSize: '36px',
+            fontWeight: 'bold',
+            color: 'white',
+            margin: 0,
+            marginBottom: '8px',
+            opacity: showContent ? 1 : 0,
+            transform: showContent ? 'translateY(0)' : 'translateY(20px)',
+            transition: 'all 0.5s ease 0.2s'
+          }}>
+            {sessionData?.isFallback ? '✅ REDIRECT SUCCESS!' : getPerformanceMessage()}
+          </h1>
+
+          <p style={{
+            fontSize: '18px',
+            color: 'rgba(255, 255, 255, 0.9)',
+            margin: 0,
+            opacity: showContent ? 1 : 0,
+            transform: showContent ? 'translateY(0)' : 'translateY(20px)',
+            transition: 'all 0.5s ease 0.4s'
+          }}>
+            {sessionData?.isFallback 
+              ? 'Enhanced SessionCompletion component is now active! 🎉'
+              : `Session completed • ${sessionData?.duration ? formatDuration(sessionData.duration) : '--:--:--'}`
+            }
+          </p>
+
+          {/* Stars */}
+          <div style={{
+            marginTop: '20px',
+            opacity: showContent ? 1 : 0,
+            transform: showContent ? 'translateY(0)' : 'translateY(20px)',
+            transition: 'all 0.5s ease 0.6s'
+          }}>
+            <AnimatedStars stars={finalSummary?.stars || 0} />
+          </div>
+        </div>
+
+        {/* Content */}
+        <div style={{ 
+          padding: '32px',
+          opacity: showContent ? 1 : 0,
+          transform: showContent ? 'translateY(0)' : 'translateY(20px)',
+          transition: 'all 0.5s ease 0.8s'
+        }}>
+          
+          {/* 10-minute minimum warning for short sessions */}
+          {sessionDuration < 600 && (
+            <div style={{
+              background: 'linear-gradient(135deg, #ff6b6b20, #ff8e8e20)',
+              border: '2px solid #ff6b6b',
+              borderRadius: '12px',
+              padding: '20px',
+              marginBottom: '24px',
+              textAlign: 'center',
+              position: 'relative'
+            }}>
+              <div style={{
+                fontSize: '24px',
+                marginBottom: '8px'
+              }}>
+                ⚠️
+              </div>
+              <h3 style={{
+                color: '#ff6b6b',
+                margin: '0 0 8px 0',
+                fontSize: '18px',
+                fontWeight: 'bold'
+              }}>
+                Session Too Short
+              </h3>
+              <p style={{
+                color: '#ff8e8e',
+                margin: 0,
+                fontSize: '14px',
+                lineHeight: '1.5'
+              }}>
+                Must work at least 10 minutes for meaningful insights. 
+                Current session: {formatDuration(sessionDuration)}
+              </p>
+            </div>
+          )}
+          {/* Stats Grid */}
+          <div className="metrics-grid" style={{ 
+            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+            marginBottom: 'var(--spacing-2xl)'
+          }}>
+            <div className="metric-card">
+              <div className="metric-icon" style={{ background: 'var(--info-color)22' }}>
+                <IconClock size={20} style={{ color: 'var(--info-color)' }} />
+              </div>
+              <div className="metric-content">
+                <h3 className="metric-value">{sessionData?.duration ? formatDuration(sessionData.duration) : '--:--:--'}</h3>
+                <p className="metric-label">Session Duration</p>
+              </div>
+            </div>
+
+            <div className="metric-card">
+              <div className="metric-icon" style={{ 
+                background: `${getProductivityColor(sessionData?.overallProductivity || 0)}22` 
+              }}>
+                <IconActivity size={20} style={{ 
+                  color: getProductivityColor(sessionData?.overallProductivity || 0) 
+                }} />
+              </div>
+              <div className="metric-content">
+                <h3 className="metric-value">{sessionData?.overallProductivity || 0}%</h3>
+                <p className="metric-label">AI Productivity Score</p>
+                {/* Add improvement indicator */}
+                {sessionData?.improvementTrend && (
+                  <div style={{
+                    fontSize: 'var(--font-xs)',
+                    color: sessionData.improvementTrend === 'improved' ? 'var(--success-color)' :
+                           sessionData.improvementTrend === 'declined' ? 'var(--error-color)' :
+                           'var(--text-muted)',
+                    marginTop: '4px'
+                  }}>
+                    {sessionData.improvementTrend === 'improved' ? '📈 Improved' :
+                     sessionData.improvementTrend === 'declined' ? '📉 Declined' :
+                     '📊 Stable'}
+                    {sessionData.improvementPercentage && sessionData.improvementTrend !== 'stable' && (
+                      <span> ({sessionData.improvementPercentage}%)</span>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="metric-card">
+              <div className="metric-icon" style={{ background: 'var(--success-color)22' }}>
+                <IconTarget size={20} style={{ color: 'var(--success-color)' }} />
+              </div>
+              <div className="metric-content">
+                <h3 className="metric-value">{sessionData?.completedTasksCount || 0}</h3>
+                <p className="metric-label">Tasks Completed</p>
+              </div>
+            </div>
+
+            <div className="metric-card">
+              <div className="metric-icon" style={{ background: 'var(--accent-purple)22' }}>
+                <IconBrain size={20} style={{ color: 'var(--accent-purple)' }} />
+              </div>
+              <div className="metric-content">
+                <h3 className="metric-value">{sessionData?.aiSummaries?.length || 0}</h3>
+                <p className="metric-label">AI Analysis Points</p>
+              </div>
+            </div>
+          </div>
+
+          {/* AI Summary */}
+          {(finalSummary?.final_summary || finalSummary?.summary) && (
+            <div className="card" style={{ marginBottom: 'var(--spacing-xl)' }}>
+              <div className="card-header">
+                <h3 className="card-title">🤖 AI Session Summary</h3>
+              </div>
+              <div className="card-content">
+                <p style={{
+                  fontSize: 'var(--font-base)',
+                  color: 'var(--text-primary)',
+                  lineHeight: '1.6',
+                  margin: 0
                 }}>
-                  ✅ Completed Tasks
-                </h4>
+                  {finalSummary.final_summary || finalSummary.summary}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Fallback Message for Short Sessions */}
+          {sessionData?.isFallback && (
+            <div className="card" style={{ marginBottom: 'var(--spacing-xl)' }}>
+              <div className="card-header">
+                <h3 className="card-title">✅ Redirect Working! 🎉</h3>
+              </div>
+              <div className="card-content">
                 <div style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '8px'
+                  background: 'var(--success-color)10',
+                  border: '1px solid var(--success-color)30',
+                  borderRadius: 'var(--radius-md)',
+                  padding: 'var(--spacing-md)',
+                  marginBottom: 'var(--spacing-md)'
                 }}>
-                  {finalSummary.completed_tasks.map((task: string, index: number) => (
-                    <div key={index} style={{
+                  <p style={{
+                    fontSize: 'var(--font-base)',
+                    color: 'var(--success-color)',
+                    fontWeight: 'bold',
+                    margin: 0,
+                    marginBottom: 'var(--spacing-xs)'
+                  }}>
+                    🚀 Success! The enhanced SessionCompletion component is now showing!
+                  </p>
+                  <p style={{
+                    fontSize: 'var(--font-sm)',
+                    color: 'var(--text-secondary)',
+                    margin: 0
+                  }}>
+                    This session was too short for AI analysis, but the redirect is working perfectly.
+                  </p>
+                </div>
+                
+                <p style={{
+                  fontSize: 'var(--font-base)',
+                  color: 'var(--text-primary)',
+                  lineHeight: '1.6',
+                  margin: 0
+                }}>
+                  This is the enhanced session completion page with comprehensive data processing. 
+                  For longer sessions, you'll see AI-powered insights, productivity scores, 
+                  completed tasks, and personalized recommendations.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Completed Tasks */}
+          {sessionData?.completedTasks && sessionData.completedTasks.length > 0 && (
+            <div className="card" style={{ marginBottom: 'var(--spacing-xl)' }}>
+              <div className="card-header">
+                <h3 className="card-title">✅ Completed Tasks ({sessionData.completedTasks.length})</h3>
+              </div>
+              <div className="card-content">
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-sm)' }}>
+                  {sessionData.completedTasks.slice(0, 8).map((task: string, i: number) => (
+                    <div key={i} style={{
                       display: 'flex',
-                      alignItems: 'center',
-                      gap: '8px',
-                      padding: '8px 12px',
-                      background: 'rgba(46, 204, 113, 0.1)',
-                      borderRadius: '8px',
-                      border: '1px solid rgba(46, 204, 113, 0.2)'
+                      alignItems: 'flex-start',
+                      gap: 'var(--spacing-sm)',
+                      padding: 'var(--spacing-sm)',
+                      background: 'var(--bg-secondary)',
+                      borderRadius: 'var(--radius-sm)',
+                      border: '1px solid var(--success-color)30'
                     }}>
-                      <IconCheck size={16} style={{ color: '#2ecc71', flexShrink: 0 }} />
-                      <span style={{
-                        color: 'rgba(255, 255, 255, 0.9)',
-                        fontSize: '14px'
+                      <span style={{ 
+                        color: 'var(--success-color)', 
+                        fontWeight: 'bold',
+                        fontSize: '16px'
                       }}>
-                        {task}
+                        ✓
                       </span>
                       <span style={{
-                        marginLeft: 'auto',
-                        fontSize: '12px',
-                        color: '#2ecc71',
-                        fontWeight: '600'
+                        fontSize: 'var(--font-sm)',
+                        color: 'var(--text-primary)',
+                        lineHeight: '1.4'
                       }}>
-                        ✓ Definite
+                        {task}
                       </span>
                     </div>
                   ))}
                 </div>
               </div>
-            )}
+            </div>
+          )}
 
-            {/* AI-Detected Tasks from Summaries */}
-            {aiSummaries.length > 0 && (() => {
-              const allCompletedTasks: Array<{task: string, confidence: 'possible' | 'likely' | 'definite'}> = [];
-              
-              aiSummaries.forEach(summary => {
-                if (summary.task_completion?.completed) {
-                  summary.task_completion.completed.forEach((task: string) => {
-                    allCompletedTasks.push({ task, confidence: 'likely' });
-                  });
-                }
-                if (summary.task_completion?.key_tasks) {
-                  summary.task_completion.key_tasks.forEach((task: string) => {
-                    if (!allCompletedTasks.some(t => t.task === task)) {
-                      allCompletedTasks.push({ task, confidence: 'possible' });
-                    }
-                  });
-                }
-              });
+          {/* Productivity Graph */}
+          {sessionData?.hourlyProductivity && sessionData.hourlyProductivity.length > 0 && (
+            <div className="card" style={{ marginBottom: 'var(--spacing-xl)' }}>
+              <div className="card-header">
+                <h3 className="card-title">📈 Hourly Productivity Analysis</h3>
+              </div>
+              <div className="card-content">
+                <ProductivityGraph 
+                  data={sessionData.hourlyProductivity}
+                  height={200}
+                />
+                <p style={{ 
+                  fontSize: 'var(--font-small)',
+                  color: 'var(--text-muted)',
+                  margin: '12px 0 0 0',
+                  textAlign: 'center'
+                }}>
+                  AI-powered productivity analysis based on {sessionData.aiSummaries.length} intervals
+                </p>
+              </div>
+            </div>
+          )}
 
-              return allCompletedTasks.length > 0 && (
-                <div>
-                  <h4 style={{
-                    color: '#3498db',
-                    fontSize: '16px',
-                    margin: '0 0 12px 0',
-                    fontWeight: '600'
-                  }}>
-                    🤖 AI-Detected Activities
-                  </h4>
-                  <div style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '8px'
-                  }}>
-                    {allCompletedTasks.map((item, index) => (
-                      <div key={index} style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '8px',
-                        padding: '8px 12px',
-                        background: item.confidence === 'definite' 
-                          ? 'rgba(46, 204, 113, 0.1)'
-                          : item.confidence === 'likely'
-                          ? 'rgba(52, 152, 219, 0.1)'
-                          : 'rgba(241, 196, 15, 0.1)',
-                        borderRadius: '8px',
-                        border: `1px solid ${
-                          item.confidence === 'definite' 
-                            ? 'rgba(46, 204, 113, 0.2)'
-                            : item.confidence === 'likely'
-                            ? 'rgba(52, 152, 219, 0.2)'
-                            : 'rgba(241, 196, 15, 0.2)'
-                        }`
-                      }}>
-                        <span style={{
-                          fontSize: '16px',
-                          flexShrink: 0
-                        }}>
-                          {item.confidence === 'definite' ? '✅' : 
-                           item.confidence === 'likely' ? '🔵' : '❓'}
-                        </span>
-                        <span style={{
-                          color: 'rgba(255, 255, 255, 0.9)',
-                          fontSize: '14px'
-                        }}>
-                          {item.task}
-                        </span>
-                        <span style={{
-                          marginLeft: 'auto',
-                          fontSize: '12px',
-                          color: item.confidence === 'definite' 
-                            ? '#2ecc71'
-                            : item.confidence === 'likely'
-                            ? '#3498db'
-                            : '#f1c40f',
-                          fontWeight: '600'
-                        }}>
-                          {item.confidence === 'definite' ? 'Definite' : 
-                           item.confidence === 'likely' ? 'Likely' : 'Possible'}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
+          {/* Recommendations */}
+          {sessionData?.recommendations && sessionData.recommendations.length > 0 && (
+            <div className="card" style={{ marginBottom: 'var(--spacing-xl)' }}>
+              <div className="card-header">
+                <h3 className="card-title">💡 AI Recommendations</h3>
+              </div>
+              <div className="card-content">
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-sm)' }}>
+                  {sessionData.recommendations.map((recommendation: string, i: number) => (
+                    <div key={i} style={{
+                      padding: 'var(--spacing-md)',
+                      background: 'var(--info-color)10',
+                      borderRadius: 'var(--radius-sm)',
+                      border: '1px solid var(--info-color)30',
+                      fontSize: 'var(--font-sm)',
+                      color: 'var(--text-primary)',
+                      lineHeight: '1.5'
+                    }}>
+                      {recommendation}
+                    </div>
+                  ))}
                 </div>
-              );
-            })()}
-          </div>
-        )}
+              </div>
+            </div>
+          )}
 
-        {/* Action Buttons */}
-        <div style={{
-          display: 'flex',
-          gap: '16px',
-          opacity: showContent ? 1 : 0,
-          transform: showContent ? 'translateY(0)' : 'translateY(30px)',
-          transition: 'all 0.8s ease 0.6s'
-        }}>
-          <button
-            onClick={handleContinue}
-            style={{
-              background: 'linear-gradient(135deg, #7b68ee, #a78bfa)',
-              color: 'white',
-              border: 'none',
-              padding: '16px 32px',
-              borderRadius: '12px',
-              fontSize: '16px',
-              fontWeight: '600',
-              cursor: 'pointer',
-              transition: 'all 0.2s ease'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.transform = 'translateY(-2px)'
-              e.currentTarget.style.boxShadow = '0 8px 25px rgba(123, 104, 238, 0.3)'
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = 'translateY(0)'
-              e.currentTarget.style.boxShadow = 'none'
-            }}
-          >
-            Continue to Dashboard
-          </button>
-          
-          <button
-            onClick={handleCopy}
-            disabled={copying}
-            style={{
-              background: 'rgba(255, 255, 255, 0.1)',
-              color: 'white',
-              border: '1px solid rgba(255, 255, 255, 0.2)',
-              padding: '16px 32px',
-              borderRadius: '12px',
-              fontSize: '16px',
-              fontWeight: '600',
-              cursor: copying ? 'not-allowed' : 'pointer',
-              transition: 'all 0.2s ease',
-              opacity: copying ? 0.7 : 1
-            }}
-            onMouseEnter={(e) => {
-              if (!copying) {
-                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.15)'
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (!copying) {
-                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)'
-              }
-            }}
-          >
-            {copying ? 'Copying...' : 'Copy Summary'}
-          </button>
+          {/* Action Buttons */}
+          <div style={{
+            display: 'flex',
+            gap: 'var(--spacing-md)',
+            justifyContent: 'center',
+            flexWrap: 'wrap'
+          }}>
+            <button
+              onClick={handleCopy}
+              disabled={copying}
+              className="button button-secondary"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 'var(--spacing-xs)',
+                minWidth: '140px'
+              }}
+            >
+              {copying ? (
+                <>
+                  <IconCheck size={16} />
+                  Copied!
+                </>
+              ) : (
+                <>
+                  <IconCopy size={16} />
+                  Copy Summary
+                </>
+              )}
+            </button>
+
+            <button
+              onClick={handleContinue}
+              className="button button-primary"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 'var(--spacing-xs)',
+                minWidth: '140px'
+              }}
+            >
+              <IconTrophy size={16} />
+              Continue
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* Enhanced CSS Animations */}
-      <style dangerouslySetInnerHTML={{
-        __html: `
-          @keyframes firework {
-            0% {
-              transform: scale(0);
-              opacity: 1;
-            }
-            50% {
-              transform: scale(1);
-              opacity: 1;
-            }
-            100% {
-              transform: scale(0);
-              opacity: 0;
-            }
+      {/* CSS Animations */}
+      <style>{`
+        @keyframes pulse {
+          0%, 100% { opacity: 0.8; transform: scale(1); }
+          50% { opacity: 1; transform: scale(1.05); }
+        }
+        
+        @keyframes firework {
+          0% { 
+            opacity: 1; 
+            transform: scale(1) translateY(0); 
           }
-          
-          @keyframes bounce {
-            0%, 20%, 50%, 80%, 100% {
-              transform: translateY(0);
-            }
-            40% {
-              transform: translateY(-10px);
-            }
-            60% {
-              transform: translateY(-5px);
-            }
+          50% { 
+            opacity: 1; 
+            transform: scale(1.2) translateY(-20px); 
           }
-          
-          @keyframes starPop {
-            0% { 
-              transform: scale(0.5) rotate(0deg); 
-              opacity: 0;
-              filter: drop-shadow(0 0 0px #FFD700);
-            }
-            50% { 
-              transform: scale(1.3) rotate(180deg); 
-              opacity: 1;
-              filter: drop-shadow(0 0 20px #FFD700);
-            }
-            100% { 
-              transform: scale(1.1) rotate(360deg); 
-              opacity: 1;
-              filter: drop-shadow(0 0 12px #FFD700);
-            }
+          100% { 
+            opacity: 0; 
+            transform: scale(1.5) translateY(-40px); 
           }
-        `
-      }} />
+        }
+      `}</style>
     </div>
   )
 }

@@ -28,6 +28,7 @@ class TrackerAgentManager extends EventEmitter {
         // Path relative to the tracker v3 directory
         const agentDir = path.join(__dirname, '..', 'agent-macos-swift');
         const possiblePaths = [
+            path.join(agentDir, 'tracker-agent'), // Direct binary in agent directory
             path.join(agentDir, '.build', 'debug', 'tracker-agent'),
             path.join(agentDir, '.build', 'release', 'tracker-agent'),
             // Fallback to building with swift run
@@ -178,7 +179,7 @@ class TrackerAgentManager extends EventEmitter {
             console.log(`Spawning agent: ${command} ${args.join(' ')}`);
             
             this.agentProcess = spawn(command, args, {
-                cwd: this.agentPath.includes('.build') ? path.dirname(this.agentPath) : this.agentPath,
+                cwd: this.agentPath ? path.dirname(this.agentPath) : this.agentPath,
                 stdio: ['pipe', 'pipe', 'pipe'],
                 env: {
                     ...process.env,
