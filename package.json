@@ -1,6 +1,6 @@
 {
   "name": "flow-ai-desktop",
-  "version": "1.0.1",
+  "version": "1.0.3",
   "description": "Flow AI Desktop Platform - Advanced Productivity Tracking",
   "main": "electron/main.js",
   "scripts": {
