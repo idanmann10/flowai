@@ -41,7 +41,7 @@ export class MemoryAIPipeline {
   private aiSummaries: AISummaryResult[] = [];
   
   private intervalTimer: NodeJS.Timeout | null = null;
-  private intervalDuration: number = 10 * 60 * 1000; // 10 minutes for optimal work day analysis
+  private intervalDuration: number = 15 * 60 * 1000; // 15 minutes
   private chunkNumber: number = 0;
   private isActive: boolean = false;
   
@@ -254,7 +254,7 @@ export class MemoryAIPipeline {
     const startTime = Date.now();
 
     console.log('');
-    console.log('🔄 === OPTIMIZATION & AI PIPELINE STEP ===');
+    console.log('🔄 === OPTIMIZATION PIPELINE STEP ===');
     console.log(`📋 Chunk: ${this.chunkNumber}`);
     console.log(`🔗 Trigger: ${trigger}`);
     console.log(`📥 Raw events: ${this.rawEventBuffer.length}`);
@@ -282,46 +282,13 @@ export class MemoryAIPipeline {
       console.log(`🔧 [SUCCESS] Optimized: ${rawSnapshot.length} → ${optimizedEvents.length} events`);
       console.log(`📦 [STATUS] Optimized buffer total: ${this.optimizedBuffer.length} events`);
 
-      // Step 3: AI summary call with entire optimized buffer
-      if (this.optimizedBuffer.length > 0) {
-        console.log('🤖 [DEBUG] Step 3: Calling AI summary service...');
-        console.log(`🔍 [DEBUG] Sending ${this.optimizedBuffer.length} optimized events to AI`);
-        
-        const aiResult = await this.callAISummary([...this.optimizedBuffer], rawSnapshot.length);
-        
-        if (aiResult) {
-          console.log('✅ [SUCCESS] AI summary generated successfully');
-          console.log(`🔍 [DEBUG] AI result keys: ${Object.keys(aiResult).join(', ')}`);
-          
-          // Store AI summary
-          const summaryResult: AISummaryResult = {
-            id: `chunk_${this.chunkNumber}_${Date.now()}`,
-            timestamp: new Date().toISOString(),
-            chunkNumber: this.chunkNumber,
-            summary: aiResult,
-            rawEventCount: rawSnapshot.length,
-            optimizedEventCount: this.optimizedBuffer.length
-          };
-
-          this.aiSummaries.push(summaryResult);
-          console.log('💾 [SUCCESS] AI summary stored in memory');
-          console.log(`📊 [RESULT] Productivity Score: ${aiResult.productivity_score}/100 (${aiResult.focus_level} focus)`);
-          console.log(`📝 [RESULT] Summary preview: ${aiResult.summary_text ? aiResult.summary_text.substring(0, 100) + '...' : 'No summary text'}`);
-          
-          // Clear optimized buffer after successful AI call
-          this.optimizedBuffer = [];
-          console.log('🧹 [SUCCESS] Optimized buffer cleared');
-        } else {
-          console.error('❌ [ERROR] AI summary failed, keeping optimized buffer');
-          console.log(`🔍 [DEBUG] Optimized buffer retained with ${this.optimizedBuffer.length} events`);
-        }
-      } else {
-        console.log('⚠️ [WARNING] No optimized events to send to AI');
-      }
+      // DISABLED: AI summary generation - this is now handled by AISummaryManager
+      console.log('⚠️ [INFO] AI summary generation disabled - handled by AISummaryManager');
+      console.log('📊 [INFO] This pipeline now only handles data collection and optimization');
 
       const processingTime = Date.now() - startTime;
       console.log(`✅ [SUCCESS] Pipeline step completed in ${processingTime}ms`);
-      console.log(`🔍 [DEBUG] Total AI summaries: ${this.aiSummaries.length}`);
+      console.log(`🔍 [DEBUG] Total optimized events: ${this.optimizedBuffer.length}`);
       console.log('='.repeat(50));
 
     } catch (error) {
@@ -333,7 +300,6 @@ export class MemoryAIPipeline {
         optimizedBufferLength: this.optimizedBuffer.length,
         chunkNumber: this.chunkNumber
       });
-      // On error, keep the optimized buffer for next attempt
     }
   }
 

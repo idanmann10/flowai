@@ -35,7 +35,7 @@ export const ProductivityGraph: React.FC<ProductivityGraphProps> = ({
 
   const getBarColor = (productivity: number): string => {
     if (productivity >= 80) return 'var(--success-color)';
-    if (productivity >= 60) return 'var(--accent-purple)';
+    if (productivity >= 70) return 'var(--accent-purple)';
     if (productivity >= 40) return 'var(--warning-color)';
     return 'var(--error-color)';
   };

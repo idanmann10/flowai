@@ -37,7 +37,8 @@ import {
   IconSun,
   IconMoon,
   IconDeviceDesktop,
-  IconShield
+  IconShield,
+  IconFlask
 } from '@tabler/icons-react'
 import { useAuth } from '../stores/authStore'
 import { supabase } from '../lib/supabaseClient'
@@ -371,7 +372,7 @@ const Settings: React.FC = () => {
               </Grid>
             </Paper>
 
-            {/* Notifications Section */}
+            {/* Notifications Section - Marked as Beta */}
             <Paper p="xl" className="glass-card">
               <Group mb="lg" gap="md">
                 <Box
@@ -388,10 +389,30 @@ const Settings: React.FC = () => {
                   <IconBell size={20} style={{ color: 'white' }} />
                 </Box>
                 <Box>
-                  <Title order={3} c="white">Notifications</Title>
-                  <Text c="dimmed" size="sm">Configure how you receive updates</Text>
+                  <Group gap="xs" align="center">
+                    <Title order={3} c="white">Notifications</Title>
+                    <Badge 
+                      color="orange" 
+                      variant="light" 
+                      size="sm"
+                      leftSection={<IconFlask size={12} />}
+                    >
+                      BETA
+                    </Badge>
+                  </Group>
+                  <Text c="dimmed" size="sm">Configure how you receive updates (Coming Soon)</Text>
                 </Box>
               </Group>
+              
+              <Alert 
+                icon={<IconFlask size={16} />} 
+                title="Beta Feature" 
+                color="orange" 
+                variant="light"
+                mb="md"
+              >
+                Notification settings are currently in development. These settings will be functional in a future update.
+              </Alert>
               
               <Stack gap="md">
                 {[
@@ -414,7 +435,7 @@ const Settings: React.FC = () => {
                     icon: IconCoffee
                   }
                 ].map(({ key, label, description, icon: Icon }) => (
-                  <Card key={key} p="md" className="glass-card">
+                  <Card key={key} p="md" className="glass-card" style={{ opacity: 0.6 }}>
                     <Group justify="space-between">
                       <Group gap="md">
                         <Icon size={20} style={{ color: '#8b5cf6' }} />
@@ -428,6 +449,7 @@ const Settings: React.FC = () => {
                         onChange={() => handleNotificationChange(key as keyof UserProfile['notification_preferences'])}
                         color="violet"
                         size="md"
+                        disabled
                       />
                     </Group>
                   </Card>
@@ -435,7 +457,7 @@ const Settings: React.FC = () => {
               </Stack>
             </Paper>
 
-            {/* Appearance Section */}
+            {/* Appearance Section - Marked as Beta */}
             <Paper p="xl" className="glass-card">
               <Group mb="lg" gap="md">
                 <Box
@@ -452,12 +474,32 @@ const Settings: React.FC = () => {
                   <IconPalette size={20} style={{ color: 'white' }} />
                 </Box>
                 <Box>
-                  <Title order={3} c="white">Appearance</Title>
-                  <Text c="dimmed" size="sm">Customize the look and feel</Text>
+                  <Group gap="xs" align="center">
+                    <Title order={3} c="white">Appearance</Title>
+                    <Badge 
+                      color="orange" 
+                      variant="light" 
+                      size="sm"
+                      leftSection={<IconFlask size={12} />}
+                    >
+                      BETA
+                    </Badge>
+                  </Group>
+                  <Text c="dimmed" size="sm">Customize the look and feel (Coming Soon)</Text>
                 </Box>
               </Group>
               
-              <Box>
+              <Alert 
+                icon={<IconFlask size={16} />} 
+                title="Beta Feature" 
+                color="orange" 
+                variant="light"
+                mb="md"
+              >
+                Theme switching is currently in development. The app will default to dark mode for now.
+              </Alert>
+              
+              <Box style={{ opacity: 0.6 }}>
                 <Text fw={500} c="white" mb="md">Theme Preference</Text>
                 <SegmentedControl
                   value={profile.theme_preference}
@@ -493,6 +535,7 @@ const Settings: React.FC = () => {
                   ]}
                   color="violet"
                   fullWidth
+                  disabled
                   style={{
                     background: 'rgba(255, 255, 255, 0.05)'
                   }}

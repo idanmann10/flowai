@@ -1,5 +1,6 @@
 import '../styles/theme.css'
 import { useState, useEffect, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { 
   IconActivity, 
   IconClock, 
@@ -22,8 +23,9 @@ import { AnimatedStars } from '../components/ui'
 import { useSessionSummaryStore } from '../stores/sessionSummaryStore'
 import { useSessionStore } from '../stores/sessionStore'
 import { memoryInsightsService } from '../services/memoryInsightsService'
-import ProductivityBarChart from '../components/ProductivityBarChart';
+import { ProductivityGraph } from '../components/ProductivityGraph';
 import logoUrl from '../assets/flow-ai-logo.png';
+import { groupProductivityByHour } from '../utils/productivityHelpers';
 
 interface SessionData {
   id: string;
@@ -31,6 +33,7 @@ interface SessionData {
   end_time: string | null;
   active_secs: number;
   idle_secs: number;
+  break_secs?: number;
   
   // AI-Powered Productivity Fields
   ai_productivity_score?: number;
@@ -48,6 +51,7 @@ interface SessionData {
   improvement_percentage?: number;
   key_accomplishments?: string[];
   completed_tasks?: string[];
+  completed_todos?: string[];
   pattern_insights?: string[];
   recommendations?: string[];
   
@@ -64,6 +68,23 @@ interface SessionData {
   focus_score?: number;
   energy_level?: string;
   engagement_score?: number;
+  
+  // AI Comprehensive Analysis fields
+  ai_comprehensive_summary?: string;
+  ai_productivity_insights?: string[];
+  ai_recommendations?: string[];
+  app_time_breakdown?: Record<string, number>;
+  distraction_events?: string[];
+  planned_todos?: string[];
+  uncompleted_todos?: string[];
+  flow_state_duration?: number;
+  deep_work_periods?: Array<{ start: string; end: string; duration: number }>;
+  break_analysis?: {
+    totalBreaks: number;
+    averageBreakLength: number;
+    longestBreak: number;
+    shortestBreak: number;
+  };
 }
 
 interface DetailedSessionData extends SessionData {
@@ -76,6 +97,8 @@ interface DetailedSessionData extends SessionData {
   focus_score?: number;
   energy_level?: string;
   engagement_score?: number;
+  ai_summary_data?: any[];
+  use_ai_summary?: boolean;
 }
 
 interface Metrics {
@@ -88,6 +111,7 @@ interface Metrics {
 const EmployeeDashboard: React.FC = () => {
   const { user } = useAuth()
   const { isActive, sessionId, startTime, hasRecoverableSession } = useSessionStore()
+  const navigate = useNavigate()
   const { 
     currentSessionId, 
     sessionStartTime, 
@@ -112,11 +136,11 @@ const EmployeeDashboard: React.FC = () => {
   // Session recovery state
   const [showRecoveryModal, setShowRecoveryModal] = useState(false)
   const [productivityData, setProductivityData] = useState<{
-    today: { time: string; productivity: number }[];
+    today: any[]; // Changed to any[] to accept HourlyProductivityData
     daily: { day: string; productivity: number; sessions: number }[];
     weekly: { day: string; productivity: number; sessions: number }[];
     monthly: { week: string; productivity: number; sessions: number }[];
-    custom?: { time: string; productivity: number }[];
+    custom?: { day: string; productivity: number; sessions: number }[];
   }>({
     today: [],
     daily: [],
@@ -171,6 +195,80 @@ const EmployeeDashboard: React.FC = () => {
     return [...new Set(tasks)].slice(0, 3)
   }
 
+  // Combine and deduplicate AI-generated accomplishments and tasks for dashboard display
+  const getCombinedAccomplishments = (session: SessionData) => {
+    const allAccomplishments: string[] = []
+    
+    // Only include AI-generated accomplishments (from AI analysis)
+    if (session.key_accomplishments && session.key_accomplishments.length > 0) {
+      allAccomplishments.push(...session.key_accomplishments)
+    }
+    
+    // Only include AI-generated completed tasks
+    if (session.completed_tasks && session.completed_tasks.length > 0) {
+      allAccomplishments.push(...session.completed_tasks)
+    }
+    
+    // Only include AI-generated completed todos
+    if (session.completed_todos && session.completed_todos.length > 0) {
+      allAccomplishments.push(...session.completed_todos)
+    }
+    
+    // Better deduplication with AI-only filtering
+    const uniqueAccomplishments: string[] = []
+    const seenAccomplishments = new Set()
+    
+    allAccomplishments.forEach(accomplishment => {
+      const normalized = accomplishment.toLowerCase().trim()
+      
+      // Skip if already seen
+      if (seenAccomplishments.has(normalized)) return
+      
+      // Check for semantic duplicates
+      const isDuplicate = uniqueAccomplishments.some(existing => {
+        const existingNormalized = existing.toLowerCase().trim()
+        
+        // Check for exact match
+        if (normalized === existingNormalized) return true
+        
+        // Check if one contains the other (with length threshold)
+        if (normalized.length > 10 && existingNormalized.length > 10) {
+          if (normalized.includes(existingNormalized) || existingNormalized.includes(normalized)) {
+            return true
+          }
+        }
+        
+        // Check for high similarity (80%+ words match)
+        const words1 = normalized.split(' ').filter(w => w.length > 2)
+        const words2 = existingNormalized.split(' ').filter(w => w.length > 2)
+        const commonWords = words1.filter(w => words2.includes(w))
+        const similarity = commonWords.length / Math.max(words1.length, words2.length)
+        
+        return similarity > 0.8
+      })
+      
+      if (!isDuplicate && accomplishment.trim().length > 3) {
+        seenAccomplishments.add(normalized)
+        uniqueAccomplishments.push(accomplishment.trim())
+      }
+    })
+    
+    return uniqueAccomplishments.slice(0, 4) // Limit to 4 most relevant for dashboard
+  }
+
+  // Calculate proper break time using break_secs when available
+  const getSessionBreakTime = (session: SessionData): number => {
+    // Use break_secs if available (more accurate), otherwise fall back to idle_secs
+    return session.break_secs || session.idle_secs || 0
+  }
+
+  // Calculate session duration using break time instead of idle time
+  const getSessionDuration = (session: SessionData): number => {
+    const activeSeconds = session.active_secs || 0
+    const breakSeconds = getSessionBreakTime(session)
+    return activeSeconds + breakSeconds
+  }
+
   // Memoize functions to prevent infinite re-renders
   const fetchSessionHistory = useCallback(async () => {
     try {
@@ -182,27 +280,41 @@ const EmployeeDashboard: React.FC = () => {
           end_time,
           active_secs,
           idle_secs,
+          break_secs,
           ai_productivity_score,
           productivity_score,
           total_keystrokes,
           total_clicks,
           break_count,
           stars,
+          session_overview,
           final_summary,
           improvement_trend,
           improvement_percentage,
           key_accomplishments,
           completed_tasks,
+          completed_todos,
           pattern_insights,
           recommendations,
           session_goal,
           session_goal_completed,
           daily_goal,
           app_usage_summary,
+          app_time_breakdown,
           primary_app,
           focus_score,
           energy_level,
-          engagement_score
+          engagement_score,
+          flow_state_duration,
+          focus_interruptions,
+          ai_comprehensive_summary,
+          ai_productivity_insights,
+          ai_recommendations,
+          planned_todos,
+          uncompleted_todos,
+          distraction_events,
+          deep_work_periods,
+          break_analysis
         `)
         .eq('user_id', user?.id)
         .order('start_time', { ascending: false })
@@ -256,10 +368,10 @@ const EmployeeDashboard: React.FC = () => {
     try {
       setLoading(true)
       
-      // Get session data with AI productivity scores
+      // Get session data with AI productivity scores and completed tasks
       const { data: sessions, error: sessionsError } = await supabase
         .from('sessions')
-        .select('ai_productivity_score, active_secs, start_time')
+        .select('ai_productivity_score, active_secs, start_time, completed_tasks')
         .eq('user_id', user?.id)
         .order('start_time', { ascending: false })
         .limit(50)
@@ -274,8 +386,12 @@ const EmployeeDashboard: React.FC = () => {
         const today = new Date()
         today.setHours(0, 0, 0, 0)
         
-        const weekStart = new Date()
-        weekStart.setDate(weekStart.getDate() - 7)
+        // Calculate the start of the current week (Sunday)
+        const currentDate = new Date()
+        const currentDay = currentDate.getDay() // 0 = Sunday, 1 = Monday, etc.
+        const weekStart = new Date(currentDate)
+        weekStart.setDate(currentDate.getDate() - currentDay) // Go back to Sunday
+        weekStart.setHours(0, 0, 0, 0)
 
         const todaySessions = sessions.filter(s => 
           new Date(s.start_time) >= today
@@ -299,8 +415,13 @@ const EmployeeDashboard: React.FC = () => {
         // Calculate total active time
         totalActiveTime = sessions.reduce((sum, s) => sum + (s.active_secs || 0), 0)
         
-        // Estimate tasks completed based on productivity score
-        tasksCompleted = Math.round(weeklyProductivity / 20) // Rough estimate
+        // Calculate actual tasks completed from this week's sessions
+        tasksCompleted = weekSessions.reduce((total, session) => {
+          if (session.completed_tasks && Array.isArray(session.completed_tasks)) {
+            return total + session.completed_tasks.length
+          }
+          return total
+        }, 0)
       }
 
       setMetrics({
@@ -331,9 +452,17 @@ const EmployeeDashboard: React.FC = () => {
   // Add new state for week, month, custom range at the top of the component
   const [selectedWeek, setSelectedWeek] = useState(() => {
     const today = new Date();
-    const weekStart = new Date(today);
-    weekStart.setDate(today.getDate() - today.getDay()); // Start of the current week (Monday)
-    return weekStart.toISOString().slice(0, 10);
+    const year = today.getFullYear();
+    
+    // Calculate ISO week number more accurately
+    const startOfYear = new Date(year, 0, 1);
+    const days = Math.floor((today.getTime() - startOfYear.getTime()) / (24 * 60 * 60 * 1000));
+    const weekNumber = Math.ceil((days + startOfYear.getDay() + 1) / 7);
+    
+    // Ensure week number is reasonable (1-53)
+    const validWeekNumber = Math.max(1, Math.min(53, weekNumber));
+    
+    return `${year}-W${validWeekNumber.toString().padStart(2, '0')}`;
   });
 
   const [selectedMonth, setSelectedMonth] = useState(() => {
@@ -354,12 +483,42 @@ const EmployeeDashboard: React.FC = () => {
   // Update generateProductivityChartData to accept a date for hourly view
   const generateProductivityChartData = useCallback(async (view: 'daily' | 'weekly' | 'monthly' | 'custom' = 'daily', dateOverride?: string) => {
     try {
-      const { data: sessions } = await supabase
+      // Fetch sessions the same way as fetchSessionHistory to get all data including ai_productivity_score
+      const { data: sessions, error } = await supabase
         .from('sessions')
-        .select('start_time, active_secs, idle_secs, ai_productivity_score')
+        .select(`
+          id,
+          start_time,
+          end_time,
+          active_secs,
+          idle_secs,
+          ai_productivity_score,
+          productivity_score,
+          total_keystrokes,
+          total_clicks,
+          break_count,
+          stars,
+          final_summary,
+          improvement_trend,
+          improvement_percentage,
+          key_accomplishments,
+          completed_tasks,
+          pattern_insights,
+          recommendations,
+          session_goal,
+          session_goal_completed,
+          daily_goal,
+          app_usage_summary,
+          primary_app,
+          focus_score,
+          energy_level,
+          engagement_score
+        `)
         .eq('user_id', user?.id)
         .order('start_time', { ascending: false })
-        .limit(50)
+        .limit(100) // Increased limit to get more data for filtering
+
+      if (error) throw error
 
       let targetDate = dateOverride;
       if (!targetDate) {
@@ -368,30 +527,162 @@ const EmployeeDashboard: React.FC = () => {
       }
 
       if (view === 'daily') {
-        const dailyData = Array.from({ length: 24 }, (_, hour) => {
-          const hourSessions = sessions?.filter(s => {
-            const sessionHour = new Date(s.start_time).getHours();
-            return sessionHour === hour;
-          }) ?? [];
-          const avgProductivity = hourSessions.length > 0
-            ? (() => {
-                const scores = hourSessions.map(s => s.ai_productivity_score || 0);
-                return (scores.reduce((sum, score) => sum + score, 0) / scores.length);
-              })()
-            : 0;
-          return {
-            time: `${hour.toString().padStart(2, '0')}:00`,
-            productivity: Math.round(avgProductivity)
-          };
-        }).filter(d => d.productivity > 0);
+        // Filter sessions for the selected date
+        const selectedDateSessions = sessions?.filter(s => {
+          const sessionDate = new Date(s.start_time).toISOString().split('T')[0];
+          return sessionDate === targetDate;
+        }) ?? [];
+
+        // Get session IDs for the selected date to fetch their AI summaries
+        const sessionIds = selectedDateSessions.map(s => s.id);
+        
+        // Fetch AI summaries for the sessions that exist for this date
+        let aiSummaries: any[] = [];
+        if (sessionIds.length > 0) {
+          const { data: summariesData, error: summariesError } = await supabase
+            .from('ai_summaries')
+            .select('*')
+            .in('session_id', sessionIds)
+            .order('created_at', { ascending: true });
+
+          if (summariesError) {
+            console.error('Error fetching AI summaries:', summariesError);
+          } else {
+            aiSummaries = summariesData || [];
+          }
+        }
+
+        // Use AI summaries if available, otherwise fall back to session data
+        let dailyData;
+        if (aiSummaries.length > 0) {
+          // Use AI summaries for granular hourly data - return HourlyProductivityData directly
+          dailyData = groupProductivityByHour(aiSummaries);
+        } else {
+          // Fall back to session-based data - convert to HourlyProductivityData format
+          const hourlyData: any = {};
+          
+          // Initialize all 24 hours
+          for (let hour = 0; hour < 24; hour++) {
+            const hourLabel = new Date(2024, 0, 1, hour).toLocaleTimeString('en-US', { 
+              hour: 'numeric', 
+              hour12: true 
+            }).replace(/:\d{2}/, '');
+            
+            hourlyData[hour.toString()] = {
+              hour: hour,
+              hourLabel: hourLabel,
+              avgProductivity: 0,
+              summaryCount: 0,
+              productivityScores: []
+            };
+          }
+          
+          // Process session data
+          selectedDateSessions.forEach(session => {
+            const hour = new Date(session.start_time).getHours();
+            const hourKey = hour.toString();
+            const score = session.ai_productivity_score || 0;
+            
+            hourlyData[hourKey].productivityScores.push(score);
+            hourlyData[hourKey].summaryCount++;
+          });
+          
+          // Calculate averages
+          dailyData = Object.values(hourlyData)
+            .map((hourData: any) => ({
+              ...hourData,
+              avgProductivity: hourData.productivityScores.length > 0 
+                ? Math.round(hourData.productivityScores.reduce((sum: number, score: number) => sum + score, 0) / hourData.productivityScores.length)
+                : 0
+            }))
+            .sort((a: any, b: any) => a.hour - b.hour);
+        }
+
         setProductivityData(prev => ({ ...prev, today: dailyData }));
       } else if (view === 'weekly') {
-        // Last 7 days (use 'day' as key)
+        // Parse the selected week (format: "YYYY-WNN" or "YYYY-MM-DD")
+        let weekStart: Date;
+        let weekEnd: Date;
+        
+        if (targetDate.includes('W')) {
+          // ISO week format (e.g., "2025-W28")
+          const [year, weekStr] = targetDate.split('-W');
+          const week = parseInt(weekStr);
+          
+          // Calculate the first day of the year
+          const firstDayOfYear = new Date(parseInt(year), 0, 1);
+          const firstWeekday = firstDayOfYear.getDay();
+          
+          // Calculate the first week of the year
+          const daysToFirstWeek = firstWeekday === 0 ? 0 : 7 - firstWeekday;
+          const firstWeekStart = new Date(firstDayOfYear);
+          firstWeekStart.setDate(firstDayOfYear.getDate() + daysToFirstWeek);
+          
+          // Calculate the target week start
+          weekStart = new Date(firstWeekStart);
+          weekStart.setDate(firstWeekStart.getDate() + (week - 1) * 7);
+        } else {
+          // Date format, calculate week from the date
+          weekStart = new Date(targetDate);
+          weekStart.setDate(weekStart.getDate() - weekStart.getDay()); // Start of week (Sunday)
+        }
+        
+        weekEnd = new Date(weekStart);
+        weekEnd.setDate(weekStart.getDate() + 6); // End of week (Saturday)
+
+        console.log('Weekly view - targetDate:', targetDate);
+        console.log('Weekly view - weekStart:', weekStart.toISOString());
+        console.log('Weekly view - weekEnd:', weekEnd.toISOString());
+        console.log('Weekly view - current date:', new Date().toISOString());
+
+        // Check if the calculated week is in the future
+        const now = new Date();
+        if (weekStart > now) {
+          console.log('Weekly view - calculated week is in the future, using current week instead');
+          // Use current week instead
+          const currentWeekStart = new Date(now);
+          currentWeekStart.setDate(now.getDate() - now.getDay()); // Start of current week (Sunday)
+          weekStart = currentWeekStart;
+          weekEnd = new Date(currentWeekStart);
+          weekEnd.setDate(currentWeekStart.getDate() + 6); // End of current week (Saturday)
+          console.log('Weekly view - adjusted weekStart:', weekStart.toISOString());
+          console.log('Weekly view - adjusted weekEnd:', weekEnd.toISOString());
+        } else {
+          console.log('Weekly view - using calculated week (not in future)');
+        }
+
+        // Debug: Log all available sessions to see what we have
+        console.log('Weekly view - all sessions:', sessions?.slice(0, 5).map(s => ({
+          start_time: s.start_time,
+          date: new Date(s.start_time).toISOString().split('T')[0],
+          ai_productivity_score: s.ai_productivity_score
+        })));
+
+        const weekSessions = sessions?.filter(s => {
+          const sessionDate = new Date(s.start_time);
+          // Use local date comparison to avoid timezone issues
+          const sessionDateStr = sessionDate.toISOString().split('T')[0];
+          const weekStartStr = weekStart.toISOString().split('T')[0];
+          const weekEndStr = weekEnd.toISOString().split('T')[0];
+          
+          console.log('Session date check:', {
+            sessionDateStr,
+            weekStartStr,
+            weekEndStr,
+            isInRange: sessionDateStr >= weekStartStr && sessionDateStr <= weekEndStr
+          });
+          
+          return sessionDateStr >= weekStartStr && sessionDateStr <= weekEndStr;
+        }) ?? [];
+
+        console.log('Weekly view - total sessions found:', weekSessions.length);
+
+        // Generate data for each day of the week
         const weeklyData = Array.from({ length: 7 }, (_, i) => {
-          const date = new Date();
-          date.setDate(date.getDate() - i);
-          const dayStr = date.toISOString().split('T')[0];
-          const daySessions = sessions?.filter(s => s.start_time.startsWith(dayStr)) ?? [];
+          const dayDate = new Date(weekStart);
+          dayDate.setDate(weekStart.getDate() + i);
+          const dayStr = dayDate.toISOString().split('T')[0];
+          const daySessions = weekSessions.filter(s => s.start_time.startsWith(dayStr));
           const avgProductivity = daySessions.length > 0
             ? (() => {
                 const scores = daySessions.map(s => s.ai_productivity_score || 0);
@@ -399,60 +690,137 @@ const EmployeeDashboard: React.FC = () => {
               })()
             : 0;
           return {
-            day: date.toLocaleDateString('en-US', { weekday: 'short' }),
+            day: dayDate.toLocaleDateString('en-US', { weekday: 'short' }),
             productivity: Math.round(avgProductivity),
             sessions: daySessions.length
           };
-        }).reverse();
+        });
+        
+        console.log('Weekly view - weeklyData:', weeklyData);
         setProductivityData(prev => ({ ...prev, weekly: weeklyData }));
       } else if (view === 'monthly') {
-        // Last 4 weeks (group by week)
-        const weeks: { week: string; productivity: number; sessions: number }[] = [];
+        // Filter sessions for the selected month
+        const monthStart = new Date(targetDate + '-01'); // First day of month
+        const monthEnd = new Date(monthStart);
+        monthEnd.setMonth(monthStart.getMonth() + 1);
+        monthEnd.setDate(0); // Last day of month
+
+        console.log('Monthly view - targetDate:', targetDate);
+        console.log('Monthly view - monthStart:', monthStart.toISOString());
+        console.log('Monthly view - monthEnd:', monthEnd.toISOString());
+        console.log('Monthly view - current date:', new Date().toISOString());
+
+        // Check if the selected month is in the future
         const now = new Date();
-        for (let w = 0; w < 4; w++) {
-          const weekStart = new Date(now);
-          weekStart.setDate(now.getDate() - now.getDay() - w * 7);
-          const weekEnd = new Date(weekStart);
-          weekEnd.setDate(weekStart.getDate() + 6);
-          const weekSessions = (sessions ?? []).filter(s => {
-            const sessionDate = new Date(s.start_time);
-            return sessionDate >= weekStart && sessionDate <= weekEnd;
-          });
-          const avgProductivity = weekSessions.length > 0
-            ? (() => {
-                const scores = weekSessions.map(s => s.ai_productivity_score || 0);
-                return (scores.reduce((sum, score) => sum + score, 0) / scores.length);
-              })()
-            : 0;
-          weeks.unshift({
-            week: `${weekStart.toISOString().split('T')[0]} - ${weekEnd.toISOString().split('T')[0]}`,
-            productivity: Math.round(avgProductivity),
-            sessions: weekSessions.length
-          });
+        let adjustedMonthStart = monthStart;
+        let adjustedMonthEnd = monthEnd;
+        
+        if (monthStart > now) {
+          console.log('Monthly view - selected month is in the future, using current month instead');
+          // Use current month instead
+          adjustedMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+          adjustedMonthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+          console.log('Monthly view - adjusted monthStart:', adjustedMonthStart.toISOString());
+          console.log('Monthly view - adjusted monthEnd:', adjustedMonthEnd.toISOString());
+        } else {
+          console.log('Monthly view - using selected month (not in future)');
         }
-        setProductivityData(prev => ({ ...prev, monthly: weeks }));
-      } else if (view === 'custom') {
-        const customData = sessions?.filter(s => {
+
+        const monthSessions = sessions?.filter(s => {
           const sessionDate = new Date(s.start_time);
-          return sessionDate >= new Date(customStartDate) && sessionDate <= new Date(customEndDate);
+          return sessionDate >= adjustedMonthStart && sessionDate <= adjustedMonthEnd;
         }) ?? [];
 
-        const customProductivityData = Array.from({ length: 24 }, (_, hour) => {
-          const hourSessions = customData.filter(s => {
-            const sessionHour = new Date(s.start_time).getHours();
-            return sessionHour === hour;
-          }) ?? [];
-          const avgProductivity = hourSessions.length > 0
+        console.log('Monthly view - total sessions found:', monthSessions.length);
+        console.log('Monthly view - sample sessions:', monthSessions.slice(0, 3).map(s => ({
+          start_time: s.start_time,
+          date: new Date(s.start_time).toISOString().split('T')[0],
+          ai_productivity_score: s.ai_productivity_score
+        })));
+
+        // Group by weeks within the month
+        const weeks: { week: string; productivity: number; sessions: number }[] = [];
+        const currentWeekStart = new Date(adjustedMonthStart);
+        let weekNumber = 1;
+        
+        while (currentWeekStart <= adjustedMonthEnd) {
+          const weekEnd = new Date(currentWeekStart);
+          weekEnd.setDate(currentWeekStart.getDate() + 6);
+          
+          // Only include weeks that have days in the current month
+          if (currentWeekStart <= adjustedMonthEnd) {
+            const weekSessions = monthSessions.filter(s => {
+              const sessionDate = new Date(s.start_time);
+              return sessionDate >= currentWeekStart && sessionDate <= weekEnd;
+            });
+            
+            console.log(`Monthly view - Week ${weekNumber}:`, {
+              weekStart: currentWeekStart.toISOString().split('T')[0],
+              weekEnd: weekEnd.toISOString().split('T')[0],
+              sessionsFound: weekSessions.length,
+              sessionDates: weekSessions.map(s => new Date(s.start_time).toISOString().split('T')[0])
+            });
+            
+            const avgProductivity = weekSessions.length > 0
+              ? (() => {
+                  const scores = weekSessions.map(s => s.ai_productivity_score || 0);
+                  return (scores.reduce((sum, score) => sum + score, 0) / scores.length);
+                })()
+              : 0;
+            
+            weeks.push({
+              week: `Week ${weekNumber}`,
+              productivity: Math.round(avgProductivity),
+              sessions: weekSessions.length
+            });
+            
+            weekNumber++;
+          }
+          
+          currentWeekStart.setDate(currentWeekStart.getDate() + 7);
+        }
+        
+        console.log('Monthly view - weeks data:', weeks);
+        setProductivityData(prev => ({ ...prev, monthly: weeks }));
+      } else if (view === 'custom') {
+        const customStart = new Date(customStartDate);
+        const customEnd = new Date(customEndDate);
+        
+        console.log('Custom view - startDate:', customStartDate);
+        console.log('Custom view - endDate:', customEndDate);
+
+        const customData = sessions?.filter(s => {
+          const sessionDate = new Date(s.start_time);
+          return sessionDate >= customStart && sessionDate <= customEnd;
+        }) ?? [];
+
+        console.log('Custom view - total sessions found:', customData.length);
+
+        // Calculate number of days in the custom range
+        const daysDiff = Math.ceil((customEnd.getTime() - customStart.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+        
+        // Generate data for each day in the custom range
+        const customProductivityData = Array.from({ length: daysDiff }, (_, i) => {
+          const dayDate = new Date(customStart);
+          dayDate.setDate(customStart.getDate() + i);
+          const dayStr = dayDate.toISOString().split('T')[0];
+          
+          const daySessions = customData.filter(s => s.start_time.startsWith(dayStr));
+          const avgProductivity = daySessions.length > 0
             ? (() => {
-                const scores = hourSessions.map(s => s.ai_productivity_score || 0);
+                const scores = daySessions.map(s => s.ai_productivity_score || 0);
                 return (scores.reduce((sum, score) => sum + score, 0) / scores.length);
               })()
             : 0;
+          
           return {
-            time: `${hour.toString().padStart(2, '0')}:00`,
-            productivity: Math.round(avgProductivity)
+            day: dayDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+            productivity: Math.round(avgProductivity),
+            sessions: daySessions.length
           };
-        }).filter(d => d.productivity > 0);
+        });
+        
+        console.log('Custom view - daily data:', customProductivityData);
         setProductivityData(prev => ({ ...prev, custom: customProductivityData }));
       }
     } catch (error) {
@@ -484,22 +852,29 @@ const EmployeeDashboard: React.FC = () => {
 
   const [chartView, setChartView] = useState<'daily' | 'weekly' | 'monthly' | 'custom'>('daily');
 
+  // Separate effect for initial data loading
   useEffect(() => {
     if (user) {
       fetchSessionHistory()
       fetchMetrics()
+      fetchMemoryInsights()
+    }
+  }, [user, fetchSessionHistory, fetchMetrics, fetchMemoryInsights])
+
+  // Separate effect for chart data updates (prevents page reload)
+  useEffect(() => {
+    if (user && chartView) {
       if (chartView === 'daily') {
         generateProductivityChartData('daily', selectedDate);
       } else if (chartView === 'weekly') {
-        generateProductivityChartData('weekly');
+        generateProductivityChartData('weekly', selectedWeek);
       } else if (chartView === 'monthly') {
-        generateProductivityChartData('monthly');
+        generateProductivityChartData('monthly', selectedMonth);
       } else if (chartView === 'custom') {
         generateProductivityChartData('custom');
       }
-      fetchMemoryInsights()
     }
-  }, [user, fetchSessionHistory, fetchMetrics, generateProductivityChartData, fetchMemoryInsights, chartView, selectedDate])
+  }, [user, generateProductivityChartData, chartView, selectedDate, selectedWeek, selectedMonth])
 
   // Update current time every second for live timer
   useEffect(() => {
@@ -545,7 +920,19 @@ const EmployeeDashboard: React.FC = () => {
     }
   }, [hasRecoverableSession, isActive, user])
 
+  // Auto-redirect to active session if session is active
+  useEffect(() => {
+    if (isActive) {
+      console.log('🔄 [DASHBOARD] Active session detected, redirecting to active session');
+      navigate('/active-session');
+    }
+  }, [isActive, navigate])
+
   const formatDuration = (seconds: number) => {
+    // Handle invalid input
+    if (!seconds || isNaN(seconds) || seconds < 0) {
+      return '0m'
+    }
     const hours = Math.floor(seconds / 3600)
     const minutes = Math.floor((seconds % 3600) / 60)
     return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`
@@ -568,13 +955,9 @@ const EmployeeDashboard: React.FC = () => {
 
   // Function to get the correct productivity score for a session
   const getSessionProductivity = (session: SessionData) => {
-    // Only use AI productivity score
-    return session.ai_productivity_score ? Math.round(session.ai_productivity_score) : 0;
-  }
-
-  const getSessionDuration = () => {
-    if (!startTime) return 0
-    return Math.floor((Date.now() - startTime.getTime()) / 1000)
+    // Only use AI productivity score with bounds checking
+    const score = session.ai_productivity_score || 0
+    return Math.max(0, Math.min(100, Math.round(score)))
   }
 
   const formatLiveTime = (seconds: number) => {
@@ -663,27 +1046,85 @@ const EmployeeDashboard: React.FC = () => {
     }
   }
 
-  const handleSessionClick = (session: SessionData) => {
+  const handleSessionClick = async (session: SessionData) => {
     const detailedSession = generateDetailedSessionData(session)
     setSelectedSession(detailedSession)
+    
+    // Calculate session duration in minutes
+    const sessionDurationMins = Math.round(getSessionDuration(session) / 60)
+    
+    // For sessions < 30 minutes, fetch AI summaries instead of using final summary
+    if (sessionDurationMins < 30) {
+      try {
+        const { data: aiSummaries } = await supabase
+          .from('ai_summaries')
+          .select('*')
+          .eq('session_id', session.id)
+          .order('created_at', { ascending: true })
+        
+                 if (aiSummaries && aiSummaries.length > 0) {
+           // Replace final summary with AI summary data
+           const sessionWithAI: DetailedSessionData = {
+             ...detailedSession,
+             ai_summary_data: aiSummaries,
+             use_ai_summary: true
+           }
+           setSelectedSession(sessionWithAI)
+         } else {
+           setSelectedSession(detailedSession)
+         }
+      } catch (error) {
+        console.error('Error fetching AI summaries:', error)
+        setSelectedSession(detailedSession)
+      }
+    }
+    
     setOpened(true)
   }
 
-  // Utility to format app usage time from seconds to human readable format
-  const formatAppUsageTime = (seconds: number) => {
-    if (seconds < 1) return '0s';
+  // Utility to format app usage time from minutes to human readable format
+  const formatAppUsageTime = (minutes: number) => {
+    if (minutes < 1) return '0m';
     
-    const minutes = Math.floor(seconds);
-    const remainingSeconds = Math.round(seconds % 60);
+    // If the value is less than 60, it's already in minutes
+    if (minutes < 60) {
+      return `${Math.round(minutes)}m`;
+    }
     
-    if (minutes === 0) {
-      return `${remainingSeconds}s`;
-    } else if (remainingSeconds === 0) {
-      return `${minutes}m`;
+    // If it's 60 or more, convert to hours and minutes
+    const hours = Math.floor(minutes / 60);
+    const remainingMinutes = Math.round(minutes % 60);
+    
+    if (remainingMinutes === 0) {
+      return `${hours}h`;
     } else {
-      return `${minutes}m ${remainingSeconds}s`;
+      return `${hours}h ${remainingMinutes}m`;
     }
   };
+
+  const refreshSessionData = async () => {
+    if (selectedSession?.id) {
+      console.log('🔄 Refreshing session data for:', selectedSession.id)
+      try {
+        // Fetch fresh session data
+        const { data: freshSession, error } = await supabase
+          .from('sessions')
+          .select('*')
+          .eq('id', selectedSession.id)
+          .single()
+
+        if (error) throw error
+
+        if (freshSession) {
+          // Update the selected session with fresh data
+          setSelectedSession(generateDetailedSessionData(freshSession))
+          console.log('✅ Session data refreshed')
+        }
+      } catch (error) {
+        console.error('❌ Error refreshing session data:', error)
+      }
+    }
+  }
 
   if (loading) {
     return (
@@ -871,14 +1312,14 @@ const EmployeeDashboard: React.FC = () => {
           </div>
           <div className="metric-value orange">
             {metrics.daily_productivity > 0 ? (
-              metrics.daily_productivity >= 0.9 ? 'A+' :
-              metrics.daily_productivity >= 0.85 ? 'A' :
-              metrics.daily_productivity >= 0.8 ? 'A-' :
-              metrics.daily_productivity >= 0.75 ? 'B+' :
-              metrics.daily_productivity >= 0.7 ? 'B' :
-              metrics.daily_productivity >= 0.65 ? 'B-' :
-              metrics.daily_productivity >= 0.6 ? 'C+' :
-              metrics.daily_productivity >= 0.55 ? 'C' : 'C-'
+              metrics.daily_productivity >= 90 ? 'A+' :
+              metrics.daily_productivity >= 85 ? 'A' :
+              metrics.daily_productivity >= 80 ? 'A-' :
+              metrics.daily_productivity >= 75 ? 'B+' :
+              metrics.daily_productivity >= 70 ? 'B' :
+              metrics.daily_productivity >= 65 ? 'B-' :
+              metrics.daily_productivity >= 60 ? 'C+' :
+              metrics.daily_productivity >= 55 ? 'C' : 'C-'
             ) : '--'}
           </div>
           <p style={{ 
@@ -1092,10 +1533,10 @@ const EmployeeDashboard: React.FC = () => {
           <div className="card-header">
             <h3 className="card-title">📈 PRODUCTIVITY ({chartView.toUpperCase()})</h3>
             <p className="card-subtitle">
-              {chartView === 'daily' && 'Productivity per hour for selected day'}
-              {chartView === 'weekly' && 'Average productivity per day for selected week'}
-              {chartView === 'monthly' && 'Average productivity per week for selected month'}
-              {chartView === 'custom' && 'Custom range productivity'}
+              {chartView === 'daily' && `Hourly productivity breakdown for ${selectedDate}`}
+              {chartView === 'weekly' && `Daily productivity for the week of ${selectedWeek}`}
+              {chartView === 'monthly' && `Weekly productivity for ${selectedMonth}`}
+              {chartView === 'custom' && `Daily productivity from ${customStartDate} to ${customEndDate}`}
             </p>
             {/* New view switcher inside card */}
             <div style={{ marginTop: 12, marginBottom: 8, display: 'flex', gap: 8 }}>
@@ -1123,26 +1564,9 @@ const EmployeeDashboard: React.FC = () => {
             )}
           </div>
           <div className="card-content">
-            <ProductivityBarChart
-              data={{
-                daily: productivityData.today || [],
-                weekly: productivityData.weekly || [],
-                monthly: productivityData.monthly || [],
-                custom: productivityData.custom || []
-              }}
-              view={chartView}
-              selectedDate={selectedDate}
-              selectedWeek={selectedWeek}
-              selectedMonth={selectedMonth}
-              customStartDate={customStartDate}
-              customEndDate={customEndDate}
-              onDateChange={setSelectedDate}
-              onWeekChange={setSelectedWeek}
-              onMonthChange={setSelectedMonth}
-              onCustomRangeChange={(start, end) => {
-                setCustomStartDate(start);
-                setCustomEndDate(end);
-              }}
+            <ProductivityGraph
+              data={chartView === 'daily' ? (productivityData.today || []) : []}
+              height={240}
             />
           </div>
         </div>
@@ -1292,20 +1716,23 @@ const EmployeeDashboard: React.FC = () => {
                                   </div>
                                 )}
                                 
-                                {/* Show AI-detected tasks if available */}
-                                {session.completed_tasks && session.completed_tasks.length > 0 && (
-                                  <div style={{ 
-                                    fontSize: 'var(--font-xs)',
-                                    color: 'var(--success-color)',
-                                    marginBottom: 'var(--spacing-xs)',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: 'var(--spacing-xs)'
-                                  }}>
-                                    <span>✓</span>
-                                    <span>{session.completed_tasks.slice(0, 2).join(', ')}{session.completed_tasks.length > 2 ? ` +${session.completed_tasks.length - 2} more` : ''}</span>
-                                  </div>
-                                )}
+                                {/* Show combined accomplishments (key accomplishments + completed tasks + todos) */}
+                                {(() => {
+                                  const combinedAccomplishments = getCombinedAccomplishments(session)
+                                  return combinedAccomplishments.length > 0 ? (
+                                    <div style={{ 
+                                      fontSize: 'var(--font-xs)',
+                                      color: 'var(--success-color)',
+                                      marginBottom: 'var(--spacing-xs)',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: 'var(--spacing-xs)'
+                                    }}>
+                                      <span>✓</span>
+                                      <span>{combinedAccomplishments.slice(0, 2).join(', ')}{combinedAccomplishments.length > 2 ? ` +${combinedAccomplishments.length - 2} more` : ''}</span>
+                                    </div>
+                                  ) : null
+                                })()}
                                 
                                 <div style={{ 
                                   display: 'flex', 
@@ -1437,7 +1864,7 @@ const EmployeeDashboard: React.FC = () => {
                       color: 'var(--text-secondary)',
                       margin: 0
                     }}>
-                      {formatDate(selectedSession.start_time)} • {formatDuration(selectedSession.active_secs + selectedSession.idle_secs)}
+                      {formatDate(selectedSession.start_time)} • {formatDuration(getSessionDuration(selectedSession))}
                     </p>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-md)' }}>
@@ -1456,11 +1883,11 @@ const EmployeeDashboard: React.FC = () => {
                 <div className="metrics-grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
                   <div style={{ textAlign: 'center' }}>
                     <p style={{ fontSize: 'var(--font-small)', color: 'var(--text-muted)', margin: 0, marginBottom: 'var(--spacing-xs)' }}>Active Time</p>
-                    <div style={{ fontSize: 'var(--font-large)', fontWeight: 'var(--font-weight-semibold)', color: 'var(--accent-purple)' }}>{formatDuration(selectedSession.active_secs)}</div>
+                    <div style={{ fontSize: 'var(--font-large)', fontWeight: 'var(--font-weight-semibold)', color: 'var(--accent-purple)' }}>{formatDuration(selectedSession.active_secs || 0)}</div>
                   </div>
                   <div style={{ textAlign: 'center' }}>
-                    <p style={{ fontSize: 'var(--font-small)', color: 'var(--text-muted)', margin: 0, marginBottom: 'var(--spacing-xs)' }}>Idle Time</p>
-                    <div style={{ fontSize: 'var(--font-large)', fontWeight: 'var(--font-weight-semibold)', color: 'var(--warning-color)' }}>{formatDuration(selectedSession.idle_secs)}</div>
+                    <p style={{ fontSize: 'var(--font-small)', color: 'var(--text-muted)', margin: 0, marginBottom: 'var(--spacing-xs)' }}>Break Time</p>
+                    <div style={{ fontSize: 'var(--font-large)', fontWeight: 'var(--font-weight-semibold)', color: 'var(--info-color)' }}>{formatDuration(getSessionBreakTime(selectedSession))}</div>
                   </div>
                   <div style={{ textAlign: 'center' }}>
                     <p style={{ fontSize: 'var(--font-small)', color: 'var(--text-muted)', margin: 0, marginBottom: 'var(--spacing-xs)' }}>Productivity</p>
@@ -1473,27 +1900,179 @@ const EmployeeDashboard: React.FC = () => {
               <div style={{ marginBottom: 'var(--spacing-xl)' }}>
                 <h4 style={{ fontSize: 'var(--font-base)', fontWeight: 'var(--font-weight-semibold)', color: 'var(--text-primary)', margin: 0, marginBottom: 'var(--spacing-md)' }}>✅ What You Accomplished</h4>
                 {(() => {
-                  // Deduplicate accomplishments
-                  const normalize = (str: string) => str.toLowerCase().replace(/[^\w\s]/g, '').replace(/\s+/g, ' ').trim();
-                  const uniqueAccomplishments: string[] = [];
-                  if (selectedSession.completed_tasks && selectedSession.completed_tasks.length > 0) {
-                    selectedSession.completed_tasks.forEach(task => {
-                      if (!uniqueAccomplishments.some(t => normalize(t) === normalize(task))) {
-                        uniqueAccomplishments.push(task);
-                      }
-                    });
-                  }
-                  return uniqueAccomplishments.length > 0 ? (
+                  // Use combined accomplishments instead of just completed_tasks
+                  const combinedAccomplishments = getCombinedAccomplishments(selectedSession)
+                  
+                  return combinedAccomplishments.length > 0 ? (
                     <ul style={{ paddingLeft: '1.5em', margin: 0, color: 'var(--success-color)' }}>
-                      {uniqueAccomplishments.map((task, idx) => (
-                        <li key={idx} style={{ marginBottom: '4px', color: 'var(--text-primary)' }}>{task}</li>
+                      {combinedAccomplishments.map((accomplishment, idx) => (
+                        <li key={idx} style={{ marginBottom: '4px', color: 'var(--text-primary)' }}>{accomplishment}</li>
                       ))}
                     </ul>
                   ) : (
                     <p style={{ fontSize: 'var(--font-base)', color: 'var(--text-muted)', margin: 0, fontStyle: 'italic' }}>No accomplishments recorded for this session</p>
-                  );
+                  )
                 })()}
               </div>
+
+                            {/* AI Summary Data (for sessions under 30 min) or Comprehensive Analysis (for longer sessions) */}
+              {selectedSession.use_ai_summary && selectedSession.ai_summary_data && selectedSession.ai_summary_data.length > 0 && (
+                <div style={{ marginBottom: 'var(--spacing-xl)' }}>
+                  <h4 style={{ fontSize: 'var(--font-base)', fontWeight: 'var(--font-weight-semibold)', color: 'var(--text-primary)', margin: 0, marginBottom: 'var(--spacing-md)' }}>🤖 AI Session Analysis (&lt; 30 min)</h4>
+                  <div style={{
+                    padding: 'var(--spacing-md)',
+                    background: 'linear-gradient(135deg, rgba(123, 104, 238, 0.05), rgba(76, 175, 80, 0.05))',
+                    borderRadius: 'var(--radius-md)',
+                    border: '1px solid rgba(123, 104, 238, 0.2)',
+                    marginBottom: 'var(--spacing-md)'
+                  }}>
+                    {selectedSession.ai_summary_data.map((summary: any, index: number) => (
+                      <div key={index} style={{ marginBottom: index < selectedSession.ai_summary_data!.length - 1 ? 'var(--spacing-md)' : 0 }}>
+                        <div style={{
+                          fontSize: 'var(--font-sm)',
+                          color: 'var(--text-muted)',
+                          marginBottom: 'var(--spacing-xs)'
+                        }}>
+                          Interval {index + 1} • {summary.productivity_score || 0}% productive
+                        </div>
+                        <p style={{
+                          fontSize: 'var(--font-base)',
+                          color: 'var(--text-primary)',
+                          margin: 0,
+                          lineHeight: '1.6',
+                          marginBottom: 'var(--spacing-sm)'
+                        }}>
+                          {summary.summary_text || summary.summary || 'No summary available'}
+                        </p>
+                        {summary.key_accomplishments && summary.key_accomplishments.length > 0 && (
+                          <div style={{ marginTop: 'var(--spacing-xs)' }}>
+                            <div style={{ fontSize: 'var(--font-xs)', color: 'var(--success-color)', fontWeight: '600' }}>
+                              ✅ Accomplished: {summary.key_accomplishments.join(', ')}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* AI Comprehensive Analysis for sessions >= 30 min */}
+              {!selectedSession.use_ai_summary && selectedSession.ai_comprehensive_summary && (
+                <div style={{ marginBottom: 'var(--spacing-xl)' }}>
+                  <h4 style={{ fontSize: 'var(--font-base)', fontWeight: 'var(--font-weight-semibold)', color: 'var(--text-primary)', margin: 0, marginBottom: 'var(--spacing-md)' }}>🧠 Comprehensive AI Analysis (≥ 30 min)</h4>
+                  <div style={{
+                    padding: 'var(--spacing-md)',
+                    background: 'linear-gradient(135deg, rgba(123, 104, 238, 0.05), rgba(76, 175, 80, 0.05))',
+                    borderRadius: 'var(--radius-md)',
+                    border: '1px solid rgba(123, 104, 238, 0.2)',
+                    marginBottom: 'var(--spacing-md)'
+                  }}>
+                    <p style={{
+                      fontSize: 'var(--font-base)',
+                      color: 'var(--text-primary)',
+                      margin: 0,
+                      lineHeight: '1.6',
+                      fontStyle: 'italic'
+                    }}>
+                      {selectedSession.ai_comprehensive_summary}
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* AI Productivity Insights */}
+              {selectedSession.ai_productivity_insights && selectedSession.ai_productivity_insights.length > 0 && (
+                <div style={{ marginBottom: 'var(--spacing-xl)' }}>
+                  <h4 style={{ fontSize: 'var(--font-base)', fontWeight: 'var(--font-weight-semibold)', color: 'var(--text-primary)', margin: 0, marginBottom: 'var(--spacing-md)' }}>💡 Strategic Productivity Insights</h4>
+                  <div style={{
+                    padding: 'var(--spacing-md)',
+                    background: 'rgba(123, 104, 238, 0.05)',
+                    borderRadius: 'var(--radius-md)',
+                    border: '1px solid rgba(123, 104, 238, 0.2)',
+                    marginBottom: 'var(--spacing-md)'
+                  }}>
+                    <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                      {selectedSession.ai_productivity_insights.map((insight, index) => (
+                        <li key={index} style={{
+                          fontSize: 'var(--font-base)',
+                          color: 'var(--text-primary)',
+                          lineHeight: '1.6',
+                          marginBottom: index < selectedSession.ai_productivity_insights!.length - 1 ? 'var(--spacing-sm)' : 0,
+                          display: 'flex',
+                          alignItems: 'flex-start',
+                          gap: 'var(--spacing-xs)'
+                        }}>
+                          <span style={{ color: 'var(--accent-purple)', fontWeight: 'bold' }}>•</span>
+                          <span>{insight}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              )}
+
+              {/* Unified AI Recommendations (deduplicated) */}
+              {(() => {
+                const allRecommendations: string[] = []
+                
+                // Add AI strategic recommendations
+                if (selectedSession.ai_recommendations && selectedSession.ai_recommendations.length > 0) {
+                  allRecommendations.push(...selectedSession.ai_recommendations)
+                }
+                
+                // Add regular recommendations (filter for AI-generated ones)
+                if (selectedSession.recommendations && selectedSession.recommendations.length > 0) {
+                  const aiRecommendations = selectedSession.recommendations.filter(rec => 
+                    rec.includes('💡') || rec.includes('📚') || rec.includes('📈') || rec.includes('⏰') ||
+                    rec.includes('🎯') || rec.includes('🚀') || rec.includes('🔧') || rec.includes('💪') ||
+                    rec.includes('recommend') || rec.includes('suggest') || rec.includes('try')
+                  )
+                  allRecommendations.push(...aiRecommendations)
+                }
+                
+                // Deduplicate recommendations
+                const uniqueRecommendations: string[] = []
+                const seenRecommendations = new Set()
+                
+                allRecommendations.forEach(rec => {
+                  const normalized = rec.toLowerCase().trim()
+                  if (!seenRecommendations.has(normalized)) {
+                    seenRecommendations.add(normalized)
+                    uniqueRecommendations.push(rec)
+                  }
+                })
+                
+                return uniqueRecommendations.length > 0 ? (
+                  <div style={{ marginBottom: 'var(--spacing-xl)' }}>
+                    <h4 style={{ fontSize: 'var(--font-base)', fontWeight: 'var(--font-weight-semibold)', color: 'var(--text-primary)', margin: 0, marginBottom: 'var(--spacing-md)' }}>💡 AI Recommendations ({uniqueRecommendations.length})</h4>
+                    <div style={{
+                      padding: 'var(--spacing-md)',
+                      background: 'rgba(76, 175, 80, 0.05)',
+                      borderRadius: 'var(--radius-md)',
+                      border: '1px solid rgba(76, 175, 80, 0.2)',
+                      marginBottom: 'var(--spacing-md)'
+                    }}>
+                      <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                        {uniqueRecommendations.map((recommendation, index) => (
+                          <li key={index} style={{
+                            fontSize: 'var(--font-base)',
+                            color: 'var(--text-primary)',
+                            lineHeight: '1.6',
+                            marginBottom: index < uniqueRecommendations.length - 1 ? 'var(--spacing-sm)' : 0,
+                            display: 'flex',
+                            alignItems: 'flex-start',
+                            gap: 'var(--spacing-xs)'
+                          }}>
+                            <span style={{ color: 'var(--accent-green)', fontWeight: 'bold' }}>→</span>
+                            <span>{recommendation}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                ) : null
+              })()}
 
               {/* Pattern Insights */}
               <div style={{ marginBottom: 'var(--spacing-xl)' }}>
@@ -1506,20 +2085,6 @@ const EmployeeDashboard: React.FC = () => {
                   </ul>
                 ) : (
                   <p style={{ fontSize: 'var(--font-base)', color: 'var(--text-muted)', margin: 0, fontStyle: 'italic' }}>No pattern insights available for this session</p>
-                )}
-              </div>
-
-              {/* Recommendations */}
-              <div style={{ marginBottom: 'var(--spacing-xl)' }}>
-                <h4 style={{ fontSize: 'var(--font-base)', fontWeight: 'var(--font-weight-semibold)', color: 'var(--text-primary)', margin: 0, marginBottom: 'var(--spacing-md)' }}>💡 Recommendations</h4>
-                {selectedSession.recommendations && selectedSession.recommendations.length > 0 ? (
-                  <ul style={{ paddingLeft: '1.5em', margin: 0, color: 'var(--info-color)' }}>
-                    {selectedSession.recommendations.map((rec, idx) => (
-                      <li key={idx} style={{ marginBottom: '4px', color: 'var(--text-primary)' }}>{rec}</li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p style={{ fontSize: 'var(--font-base)', color: 'var(--text-muted)', margin: 0, fontStyle: 'italic' }}>No recommendations available for this session</p>
                 )}
               </div>
 
@@ -1567,8 +2132,40 @@ const EmployeeDashboard: React.FC = () => {
               </div>
 
               {/* Close Button at the bottom */}
-              <div style={{ display: 'flex', justifyContent: 'center', marginTop: 'var(--spacing-xl)' }}>
-                <button onClick={() => setOpened(false)} style={{ padding: '10px 32px', fontSize: 'var(--font-base)', borderRadius: 'var(--radius-md)', background: 'var(--accent-purple)', color: 'white', border: 'none', cursor: 'pointer', fontWeight: 600 }}>Close</button>
+              <div style={{ display: 'flex', justifyContent: 'center', gap: 'var(--spacing-md)', marginTop: 'var(--spacing-xl)' }}>
+                <button 
+                  onClick={refreshSessionData}
+                  style={{ 
+                    padding: '10px 20px', 
+                    fontSize: 'var(--font-base)', 
+                    borderRadius: 'var(--radius-md)', 
+                    background: 'var(--bg-secondary)', 
+                    color: 'var(--text-primary)', 
+                    border: '1px solid var(--border-color)', 
+                    cursor: 'pointer', 
+                    fontWeight: 600,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 'var(--spacing-xs)'
+                  }}
+                >
+                  🔄 Refresh Data
+                </button>
+                <button 
+                  onClick={() => setOpened(false)} 
+                  style={{ 
+                    padding: '10px 32px', 
+                    fontSize: 'var(--font-base)', 
+                    borderRadius: 'var(--radius-md)', 
+                    background: 'var(--accent-purple)', 
+                    color: 'white', 
+                    border: 'none', 
+                    cursor: 'pointer', 
+                    fontWeight: 600 
+                  }}
+                >
+                  Close
+                </button>
               </div>
             </div>
           </div>

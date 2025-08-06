@@ -40,6 +40,7 @@ import {
   IconChartLine
 } from '@tabler/icons-react'
 import { useSessionSummaryStore } from '../stores/sessionSummaryStore'
+import { useSessionStore } from '../stores/sessionStore'
 import { notifications } from '@mantine/notifications'
 import { finalSessionSummaryService } from '../services/finalSessionSummaryService'
 import { useAuth } from '../stores/authStore'
@@ -59,7 +60,7 @@ const SessionSummaryModal: React.FC = () => {
   const { user } = useAuth()
   const {
     showSummaryModal,
-    sessionDuration,
+    sessionDuration: totalSessionDuration,
     concatenatedSummary,
     aiSummaries,
     sessionStartTime,
@@ -70,6 +71,30 @@ const SessionSummaryModal: React.FC = () => {
     copyToClipboard,
     finalSummary: storeFinalSummary
   } = useSessionSummaryStore()
+
+  // Get actual session data from sessionStore for accurate duration
+  const { startTime, currentMetrics, isOnBreak, breakStartTime } = useSessionStore()
+  
+  // Calculate actual session duration (active time only)
+  const getActualSessionDuration = () => {
+    if (!startTime) return 0
+    
+    const endTime = new Date()
+    const totalElapsed = Math.floor((endTime.getTime() - startTime.getTime()) / 1000)
+    
+    // Subtract break time to get active session time
+    const breakTimeSeconds = currentMetrics.breakTime
+    
+    // Add current break time if we're currently on break
+    let currentBreakTime = 0
+    if (isOnBreak && breakStartTime) {
+      currentBreakTime = Math.floor((endTime.getTime() - breakStartTime.getTime()) / 1000)
+    }
+    
+    return Math.max(0, totalElapsed - breakTimeSeconds - currentBreakTime)
+  }
+  
+  const sessionDuration = getActualSessionDuration()
 
   // Add debug logging for modal visibility
   useEffect(() => {
@@ -116,24 +141,40 @@ const SessionSummaryModal: React.FC = () => {
     }
   };
 
-  // Use store's final summary or generate as fallback
+  // Use store's final summary or generate as fallback based on session duration
   useEffect(() => {
     if (showSummaryModal && currentSessionId && user) {
       console.log('[DEBUG][MODAL] SessionSummaryModal opened for session:', currentSessionId, 'user:', user.id);
       
+      // Check session duration to determine which data to use
+      const sessionDurationMins = sessionDuration ? Math.round(sessionDuration / 60) : 0
+      const shouldUseAISummary = sessionDurationMins < 30
+      
+      console.log('[DEBUG][MODAL] Duration check:', {
+        sessionDurationMins,
+        shouldUseAISummary
+      })
+      
       // Fetch AI summaries
       fetchSessionAISummaries(currentSessionId);
       
+      // Only use/generate final summary for sessions >= 30 min
+      if (!shouldUseAISummary) {
       if (storeFinalSummary) {
-        console.log('[DEBUG][MODAL] Using final summary from store:', storeFinalSummary);
+          console.log('[DEBUG][MODAL] Using final summary from store (>= 30 min):', storeFinalSummary);
         setFinalSummary(storeFinalSummary);
         setError(null);
       } else {
-        console.log('[DEBUG][MODAL] No final summary in store, generating as fallback...');
+          console.log('[DEBUG][MODAL] No final summary in store, generating as fallback (>= 30 min)...');
         generateFinalSummary();
+        }
+      } else {
+        console.log('[DEBUG][MODAL] Using AI summaries only (< 30 min)');
+        setFinalSummary(null); // Clear final summary for short sessions
+        setError(null);
       }
     }
-  }, [showSummaryModal, currentSessionId, user, storeFinalSummary]);
+  }, [showSummaryModal, currentSessionId, user, storeFinalSummary, sessionDuration]);
 
   const generateFinalSummary = async () => {
     if (!currentSessionId || !user) {

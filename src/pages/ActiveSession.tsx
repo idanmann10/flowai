@@ -134,25 +134,47 @@ const ActiveSession: React.FC = () => {
       completeGoal()
     }
     
-    // Handle todo completion
+    // Handle todo completion with improved matching
     if (result.result?.completedTodos && result.result.completedTodos.length > 0) {
       console.log('✅ AI detected completed tasks:', result.result.completedTodos)
       
       result.result.completedTodos.forEach((completedTaskText: string) => {
         const aiCompleted = normalize(completedTaskText)
         
-        const matchingTodo = sessionTodos.find(todo => {
+        // Try exact match first
+        let matchingTodo = sessionTodos.find(todo => {
           const todoNormalized = normalize(todo.text)
           return todoNormalized === aiCompleted
         })
         
+        // If no exact match, try fuzzy matching (contains or similarity)
+        if (!matchingTodo) {
+          matchingTodo = sessionTodos.find(todo => {
+            const todoNormalized = normalize(todo.text)
+            const aiNormalized = normalize(completedTaskText)
+            
+            // Check if one contains the other (with minimum length to avoid false positives)
+            if (todoNormalized.length > 5 && aiNormalized.length > 5) {
+              return todoNormalized.includes(aiNormalized) || aiNormalized.includes(todoNormalized)
+            }
+            
+            // Check similarity with keywords
+            const todoWords = todoNormalized.split(' ').filter(w => w.length > 3)
+            const aiWords = aiNormalized.split(' ').filter(w => w.length > 3)
+            const commonWords = todoWords.filter(word => aiWords.includes(word))
+            
+            // If they share more than half the meaningful words, consider it a match
+            return commonWords.length > 0 && commonWords.length >= Math.min(todoWords.length, aiWords.length) * 0.5
+          })
+        }
+        
         if (matchingTodo && !matchingTodo.completed) {
-          console.log(`✅ Auto-completing task: "${matchingTodo.text}" (ID: ${matchingTodo.id})`)
+          console.log(`✅ Auto-completing task: "${matchingTodo.text}" (ID: ${matchingTodo.id}) - matched with "${completedTaskText}"`)
           completeTodo(matchingTodo.id, 'ai', 'likely')
         } else if (matchingTodo && matchingTodo.completed) {
           console.log(`⚠️ Task already completed: "${matchingTodo.text}"`)
         } else {
-          console.log(`❌ No matching todo found for: "${completedTaskText}"`)
+          console.log(`❌ No matching todo found for: "${completedTaskText}" among todos:`, sessionTodos.map(t => t.text))
         }
       })
     }
@@ -167,7 +189,7 @@ const ActiveSession: React.FC = () => {
     return () => {
       window.electronAPI.tracker.removeAIProcessingListener()
     }
-  }, [handleAIResult])
+  }, [handleAIResult, sessionTodos])
 
   // Watch for session summary modal state and navigate to completion page
   const { showSummaryModal } = useSessionSummaryStore()
@@ -447,7 +469,20 @@ const ActiveSession: React.FC = () => {
 
   const getSessionDuration = () => {
     if (!startTime) return 0
-    return Math.floor((currentTime.getTime() - startTime.getTime()) / 1000)
+    
+    // Calculate total elapsed time
+    const totalElapsed = Math.floor((currentTime.getTime() - startTime.getTime()) / 1000)
+    
+    // Subtract break time to get active session time (breakTime is already in seconds)
+    const breakTimeSeconds = currentMetrics.breakTime
+    
+    // Add current break time if we're currently on break
+    let currentBreakTime = 0
+    if (isOnBreak && breakStartTime) {
+      currentBreakTime = Math.floor((currentTime.getTime() - breakStartTime.getTime()) / 1000)
+    }
+    
+    return Math.max(0, totalElapsed - breakTimeSeconds - currentBreakTime)
   }
 
   const formatTime = (seconds: number) => {
@@ -465,20 +500,20 @@ const ActiveSession: React.FC = () => {
     // Deep work session (30+ minutes)
     if (sessionDuration > 1800) {
       if (productivityScore >= 80) return { emoji: '🔥', text: 'You\'re in the zone! Amazing focus!' }
-      if (productivityScore >= 60) return { emoji: '💪', text: 'Deep work session going strong!' }
+      if (productivityScore >= 70) return { emoji: '💪', text: 'Deep work session going strong!' }
       return { emoji: '⚡', text: 'Great endurance! Keep pushing forward!' }
     }
     
     // Medium session (15-30 minutes)
     if (sessionDuration > 900) {
       if (completedTasks > 0) return { emoji: '🎉', text: 'Making real progress!' }
-      if (productivityScore >= 70) return { emoji: '🚀', text: 'Building momentum!' }
+      if (productivityScore >= 70) return { emoji: '🌟', text: 'Great start!' }
       return { emoji: '💫', text: 'Finding your rhythm!' }
     }
     
     // Starting session (0-15 minutes)
     if (completedTasks > 0) return { emoji: '⭐', text: 'Quick wins! Love it!' }
-    if (productivityScore >= 60) return { emoji: '🌟', text: 'Great start!' }
+    if (productivityScore >= 70) return { emoji: '🌟', text: 'Great start!' }
     return { emoji: '🎯', text: 'Let\'s make it happen!' }
   }
 
@@ -642,195 +677,188 @@ const ActiveSession: React.FC = () => {
           </div>
         </div>
 
-        {/* Productivity Bar - Full Width */}
-        {latestAIResult?.result?.productivityScore !== undefined && (
-          <div style={{
-            width: '100vw',
-            marginLeft: 'calc(-50vw + 50%)',
-            marginBottom: 'var(--spacing-lg)',
-            padding: 'var(--spacing-md) calc(50vw - 50%)',
-            background: `linear-gradient(90deg, ${
-              latestAIResult.result.productivityScore >= 80 ? 'var(--success-color)' : 
-              latestAIResult.result.productivityScore >= 60 ? 'var(--accent-purple)' : 
-              latestAIResult.result.productivityScore >= 40 ? 'var(--warning-color)' : 
-              'var(--error-color)'
-            }15, ${
-              latestAIResult.result.productivityScore >= 80 ? 'var(--success-color)' : 
-              latestAIResult.result.productivityScore >= 60 ? 'var(--accent-purple)' : 
-              latestAIResult.result.productivityScore >= 40 ? 'var(--warning-color)' : 
-              'var(--error-color)'
-            }05)`,
-            borderTop: `3px solid ${
-              latestAIResult.result.productivityScore >= 80 ? 'var(--success-color)' : 
-              latestAIResult.result.productivityScore >= 60 ? 'var(--accent-purple)' : 
-              latestAIResult.result.productivityScore >= 40 ? 'var(--warning-color)' : 
-              'var(--error-color)'
-            }`,
-            borderBottom: `1px solid ${
-              latestAIResult.result.productivityScore >= 80 ? 'var(--success-color)' : 
-              latestAIResult.result.productivityScore >= 60 ? 'var(--accent-purple)' : 
-              latestAIResult.result.productivityScore >= 40 ? 'var(--warning-color)' : 
-              'var(--error-color)'
-            }22`
-          }}>
-            <div style={{
-              maxWidth: '1200px',
-              margin: '0 auto',
-              display: 'flex', 
-              alignItems: 'center', 
-              justifyContent: 'space-between'
-            }}>
-              <div>
-                <span style={{ 
-                  fontSize: 'var(--font-large)', 
-                  fontWeight: 'var(--font-weight-bold)',
-                  color: 'var(--text-primary)'
-                }}>
-                  Productivity Score
-                </span>
-                <div style={{
-                  fontSize: 'var(--font-small)',
-                  color: 'var(--text-secondary)',
-                  marginTop: 'var(--spacing-xs)'
-                }}>
-                  📊 AI-analyzed work effectiveness
-                </div>
-              </div>
-              
-              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-lg)' }}>
-                <div style={{
-                  width: '200px',
-                  height: '12px',
-                  background: 'rgba(255, 255, 255, 0.2)',
-                  borderRadius: 'var(--radius-sm)',
-                  overflow: 'hidden'
-                }}>
-                  <div style={{
-                    width: `${latestAIResult.result.productivityScore}%`,
-                    height: '100%',
-                    background: latestAIResult.result.productivityScore >= 80 ? 'var(--success-color)' : 
-                               latestAIResult.result.productivityScore >= 60 ? 'var(--accent-purple)' : 
-                               latestAIResult.result.productivityScore >= 40 ? 'var(--warning-color)' : 
-                               'var(--error-color)',
-                    borderRadius: 'var(--radius-sm)',
-                    transition: 'width 0.5s ease'
-                  }} />
-                </div>
-                
-                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)' }}>
-                  <span style={{ 
-                    fontSize: 'var(--font-xxl)',
-                    fontWeight: 'var(--font-weight-bold)',
-                    color: latestAIResult.result.productivityScore >= 80 ? 'var(--success-color)' : 
-                           latestAIResult.result.productivityScore >= 60 ? 'var(--accent-purple)' : 
-                           latestAIResult.result.productivityScore >= 40 ? 'var(--warning-color)' : 
-                           'var(--error-color)'
-                  }}>
-                    {latestAIResult.result.productivityScore}%
-                  </span>
-                  <span style={{ fontSize: 'var(--font-base)', color: 'var(--text-secondary)' }}>
-                    📈
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Energy Level Bar - Full Width */}
-        {latestAIResult?.result?.energyLevel !== undefined && (
+        {/* Productivity and Energy Meters - Side by Side */}
+        {((latestAIResult?.result?.productivityScore !== undefined || latestAIResult?.result?.productivityPct !== undefined) || latestAIResult?.result?.energyLevel !== undefined) && (
           <div style={{
             width: '100vw',
             marginLeft: 'calc(-50vw + 50%)',
             marginBottom: 'var(--spacing-xl)',
             padding: 'var(--spacing-md) calc(50vw - 50%)',
-            background: `linear-gradient(90deg, ${
-              latestAIResult.result.energyLevel >= 80 ? 'var(--success-color)' : 
-              latestAIResult.result.energyLevel >= 60 ? 'var(--info-color)' : 
-              latestAIResult.result.energyLevel >= 40 ? 'var(--warning-color)' : 
-              'var(--error-color)'
-            }15, ${
-              latestAIResult.result.energyLevel >= 80 ? 'var(--success-color)' : 
-              latestAIResult.result.energyLevel >= 60 ? 'var(--info-color)' : 
-              latestAIResult.result.energyLevel >= 40 ? 'var(--warning-color)' : 
-              'var(--error-color)'
-            }05)`,
-            borderTop: `3px solid ${
-              latestAIResult.result.energyLevel >= 80 ? 'var(--success-color)' : 
-              latestAIResult.result.energyLevel >= 60 ? 'var(--info-color)' : 
-              latestAIResult.result.energyLevel >= 40 ? 'var(--warning-color)' : 
-              'var(--error-color)'
-            }`,
-            borderBottom: `1px solid ${
-              latestAIResult.result.energyLevel >= 80 ? 'var(--success-color)' : 
-              latestAIResult.result.energyLevel >= 60 ? 'var(--info-color)' : 
-              latestAIResult.result.energyLevel >= 40 ? 'var(--warning-color)' : 
-              'var(--error-color)'
-            }22`
+            background: 'var(--background-secondary)',
+            borderTop: '3px solid var(--accent-purple)',
+            borderBottom: '1px solid var(--border-color)'
           }}>
             <div style={{
               maxWidth: '1200px',
               margin: '0 auto',
               display: 'flex', 
-              alignItems: 'center', 
-              justifyContent: 'space-between'
+              gap: 'var(--spacing-xl)',
+              flexWrap: 'wrap'
             }}>
-              <div>
-                <span style={{ 
-                  fontSize: 'var(--font-large)', 
-                  fontWeight: 'var(--font-weight-bold)',
-                  color: 'var(--text-primary)'
-                }}>
-                  Energy Level
-                </span>
-                {latestAIResult.result?.breakRecommendation && (
-                  <div style={{
-                    fontSize: 'var(--font-small)',
-                    color: 'var(--text-secondary)',
-                    marginTop: 'var(--spacing-xs)'
-                  }}>
-                    💡 {latestAIResult.result.breakRecommendation}
-                  </div>
-                )}
-              </div>
-              
-              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-lg)' }}>
+              {/* Productivity Meter */}
+              {(latestAIResult?.result?.productivityScore !== undefined || latestAIResult?.result?.productivityPct !== undefined) && (
                 <div style={{
-                  width: '200px',
-                  height: '12px',
-                  background: 'rgba(255, 255, 255, 0.2)',
-                  borderRadius: 'var(--radius-sm)',
-                  overflow: 'hidden'
+                  flex: '1',
+                  minWidth: '300px',
+                  padding: 'var(--spacing-md)',
+                  background: `linear-gradient(90deg, ${
+                    (latestAIResult.result.productivityScore || latestAIResult.result.productivityPct) >= 80 ? 'var(--success-color)' : 
+                    (latestAIResult.result.productivityScore || latestAIResult.result.productivityPct) >= 60 ? 'var(--accent-purple)' : 
+                    (latestAIResult.result.productivityScore || latestAIResult.result.productivityPct) >= 40 ? 'var(--warning-color)' : 
+                    'var(--error-color)'
+                  }15, ${
+                    (latestAIResult.result.productivityScore || latestAIResult.result.productivityPct) >= 80 ? 'var(--success-color)' : 
+                    (latestAIResult.result.productivityScore || latestAIResult.result.productivityPct) >= 60 ? 'var(--accent-purple)' : 
+                    (latestAIResult.result.productivityScore || latestAIResult.result.productivityPct) >= 40 ? 'var(--warning-color)' : 
+                    'var(--error-color)'
+                  }05)`,
+                  borderRadius: 'var(--radius-md)',
+                  border: `2px solid ${
+                    (latestAIResult.result.productivityScore || latestAIResult.result.productivityPct) >= 80 ? 'var(--success-color)' : 
+                    (latestAIResult.result.productivityScore || latestAIResult.result.productivityPct) >= 60 ? 'var(--accent-purple)' : 
+                    (latestAIResult.result.productivityScore || latestAIResult.result.productivityPct) >= 40 ? 'var(--warning-color)' : 
+                    'var(--error-color)'
+                  }`
                 }}>
-                  <div style={{
-                    width: `${latestAIResult.result.energyLevel}%`,
-                    height: '100%',
-                    background: latestAIResult.result.energyLevel >= 80 ? 'var(--success-color)' : 
+                  <div style={{ marginBottom: 'var(--spacing-sm)' }}>
+                    <span style={{ 
+                      fontSize: 'var(--font-large)', 
+                      fontWeight: 'var(--font-weight-bold)',
+                      color: 'var(--text-primary)'
+                    }}>
+                      Productivity Score
+                    </span>
+                    <div style={{
+                      fontSize: 'var(--font-small)',
+                      color: 'var(--text-secondary)',
+                      marginTop: 'var(--spacing-xs)'
+                    }}>
+                      📊 AI-analyzed work effectiveness
+                    </div>
+                  </div>
+                  
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-lg)' }}>
+                    <div style={{
+                      flex: '1',
+                      height: '12px',
+                      background: 'rgba(255, 255, 255, 0.2)',
+                      borderRadius: 'var(--radius-sm)',
+                      overflow: 'hidden'
+                    }}>
+                      <div style={{
+                        width: `${latestAIResult.result.productivityScore || latestAIResult.result.productivityPct}%`,
+                        height: '100%',
+                        background: (latestAIResult.result.productivityScore || latestAIResult.result.productivityPct) >= 80 ? 'var(--success-color)' : 
+                                   (latestAIResult.result.productivityScore || latestAIResult.result.productivityPct) >= 70 ? 'var(--accent-purple)' : 
+                                   (latestAIResult.result.productivityScore || latestAIResult.result.productivityPct) >= 40 ? 'var(--warning-color)' : 
+                                   'var(--error-color)',
+                        borderRadius: 'var(--radius-sm)',
+                        transition: 'width 0.5s ease'
+                      }} />
+                    </div>
+                    
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)' }}>
+                      <span style={{ 
+                        fontSize: 'var(--font-xxl)',
+                        fontWeight: 'var(--font-weight-bold)',
+                        color: (latestAIResult.result.productivityScore || latestAIResult.result.productivityPct) >= 80 ? 'var(--success-color)' : 
+                               (latestAIResult.result.productivityScore || latestAIResult.result.productivityPct) >= 70 ? 'var(--accent-purple)' : 
+                               (latestAIResult.result.productivityScore || latestAIResult.result.productivityPct) >= 40 ? 'var(--warning-color)' : 
+                               'var(--error-color)'
+                      }}>
+                        {latestAIResult.result.productivityScore || latestAIResult.result.productivityPct}%
+                      </span>
+                      <span style={{ fontSize: 'var(--font-base)', color: 'var(--text-secondary)' }}>
+                        📈
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Energy Meter */}
+              {latestAIResult?.result?.energyLevel !== undefined && (
+                <div style={{
+                  flex: '1',
+                  minWidth: '300px',
+                  padding: 'var(--spacing-md)',
+                  background: `linear-gradient(90deg, ${
+                    latestAIResult.result.energyLevel >= 80 ? 'var(--success-color)' : 
+                    latestAIResult.result.energyLevel >= 60 ? 'var(--info-color)' : 
+                    latestAIResult.result.energyLevel >= 40 ? 'var(--warning-color)' : 
+                    'var(--error-color)'
+                  }15, ${
+                    latestAIResult.result.energyLevel >= 80 ? 'var(--success-color)' : 
+                    latestAIResult.result.energyLevel >= 60 ? 'var(--info-color)' : 
+                    latestAIResult.result.energyLevel >= 40 ? 'var(--warning-color)' : 
+                    'var(--error-color)'
+                  }05)`,
+                  borderRadius: 'var(--radius-md)',
+                  border: `2px solid ${
+                    latestAIResult.result.energyLevel >= 80 ? 'var(--success-color)' : 
+                    latestAIResult.result.energyLevel >= 60 ? 'var(--info-color)' : 
+                    latestAIResult.result.energyLevel >= 40 ? 'var(--warning-color)' : 
+                    'var(--error-color)'
+                  }`
+                }}>
+                  <div style={{ marginBottom: 'var(--spacing-sm)' }}>
+                    <span style={{ 
+                      fontSize: 'var(--font-large)', 
+                      fontWeight: 'var(--font-weight-bold)',
+                      color: 'var(--text-primary)'
+                    }}>
+                      Energy Level
+                    </span>
+                    {latestAIResult.result?.breakRecommendation && (
+                      <div style={{
+                        fontSize: 'var(--font-small)',
+                        color: 'var(--text-secondary)',
+                        marginTop: 'var(--spacing-xs)'
+                      }}>
+                        💡 {latestAIResult.result.breakRecommendation}
+                      </div>
+                    )}
+                  </div>
+                  
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-lg)' }}>
+                    <div style={{
+                      flex: '1',
+                      height: '12px',
+                      background: 'rgba(255, 255, 255, 0.2)',
+                      borderRadius: 'var(--radius-sm)',
+                      overflow: 'hidden'
+                    }}>
+                      <div style={{
+                        width: `${latestAIResult.result.energyLevel}%`,
+                        height: '100%',
+                        background: latestAIResult.result.energyLevel >= 80 ? 'var(--success-color)' : 
+                                   latestAIResult.result.energyLevel >= 60 ? 'var(--info-color)' : 
+                                   latestAIResult.result.energyLevel >= 40 ? 'var(--warning-color)' : 
+                                   'var(--error-color)',
+                        borderRadius: 'var(--radius-sm)',
+                        transition: 'width 0.5s ease'
+                      }} />
+                    </div>
+                    
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)' }}>
+                      <span style={{ 
+                        fontSize: 'var(--font-xxl)',
+                        fontWeight: 'var(--font-weight-bold)',
+                        color: latestAIResult.result.energyLevel >= 80 ? 'var(--success-color)' : 
                                latestAIResult.result.energyLevel >= 60 ? 'var(--info-color)' : 
                                latestAIResult.result.energyLevel >= 40 ? 'var(--warning-color)' : 
-                               'var(--error-color)',
-                    borderRadius: 'var(--radius-sm)',
-                    transition: 'width 0.5s ease'
-                  }} />
+                               'var(--error-color)'
+                      }}>
+                        {latestAIResult.result.energyLevel}%
+                      </span>
+                      <span style={{ fontSize: 'var(--font-base)', color: 'var(--text-secondary)' }}>
+                        {latestAIResult.result.energyTrend === 'increasing' ? '📈' : 
+                         latestAIResult.result.energyTrend === 'declining' ? '📉' : '📊'}
+                      </span>
+                    </div>
+                  </div>
                 </div>
-                
-                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)' }}>
-                  <span style={{ 
-                    fontSize: 'var(--font-xxl)',
-                    fontWeight: 'var(--font-weight-bold)',
-                    color: latestAIResult.result.energyLevel >= 80 ? 'var(--success-color)' : 
-                           latestAIResult.result.energyLevel >= 60 ? 'var(--info-color)' : 
-                           latestAIResult.result.energyLevel >= 40 ? 'var(--warning-color)' : 
-                           'var(--error-color)'
-                  }}>
-                    {latestAIResult.result.energyLevel}%
-                  </span>
-                  <span style={{ fontSize: 'var(--font-base)', color: 'var(--text-secondary)' }}>
-                    {latestAIResult.result.energyTrend === 'increasing' ? '📈' : 
-                     latestAIResult.result.energyTrend === 'declining' ? '📉' : '📊'}
-                  </span>
-                </div>
-              </div>
+              )}
             </div>
           </div>
         )}
@@ -914,17 +942,17 @@ const ActiveSession: React.FC = () => {
                 </h3>
                 <div style={{ display: 'flex', gap: 'var(--spacing-lg)' }}>
                   {/* Productivity Score */}
-                  {latestAIResult.result?.productivityScore !== undefined && (
+                  {(latestAIResult.result?.productivityScore !== undefined || latestAIResult.result?.productivityPct !== undefined) && (
                     <div style={{ textAlign: 'center' }}>
                       <div style={{
                         fontSize: 'var(--font-2xl)',
                         fontWeight: '700',
-                        color: latestAIResult.result.productivityScore >= 80 ? 'var(--success-color)' : 
-                               latestAIResult.result.productivityScore >= 60 ? 'var(--info-color)' : 
-                               latestAIResult.result.productivityScore >= 40 ? 'var(--warning-color)' : 
+                        color: (latestAIResult.result.productivityScore || latestAIResult.result.productivityPct) >= 80 ? 'var(--success-color)' : 
+                               (latestAIResult.result.productivityScore || latestAIResult.result.productivityPct) >= 70 ? 'var(--info-color)' : 
+                               (latestAIResult.result.productivityScore || latestAIResult.result.productivityPct) >= 40 ? 'var(--warning-color)' : 
                                'var(--error-color)'
                       }}>
-                        {latestAIResult.result.productivityScore}%
+                        {latestAIResult.result.productivityScore || latestAIResult.result.productivityPct}%
                       </div>
                       <div style={{
                         fontSize: 'var(--font-xs)',
@@ -970,8 +998,41 @@ const ActiveSession: React.FC = () => {
               padding: 'var(--spacing-lg)'
             }}>
               
-              {/* Left Column: What You Accomplished */}
+              {/* Left Column: Session Overview & What You Accomplished */}
               <div>
+                {/* Session Overview */}
+                {latestAIResult.result?.sessionOverview && (
+                  <div style={{ marginBottom: 'var(--spacing-lg)' }}>
+                    <h4 style={{
+                      margin: '0 0 var(--spacing-sm) 0',
+                      color: 'var(--text-primary)',
+                      fontSize: 'var(--font-md)',
+                      fontWeight: '600',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 'var(--spacing-sm)'
+                    }}>
+                      📋 Session Focus
+                    </h4>
+                    <div style={{
+                      padding: 'var(--spacing-md)',
+                      background: 'var(--info-color)10',
+                      borderRadius: 'var(--radius-md)',
+                      border: '1px solid var(--info-color)20'
+                    }}>
+                      <p style={{
+                        color: 'var(--text-primary)',
+                        fontSize: 'var(--font-sm)',
+                        lineHeight: '1.5',
+                        margin: 0,
+                        fontWeight: '500'
+                      }}>
+                        {latestAIResult.result.sessionOverview}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
                 <h4 style={{
                   margin: '0 0 var(--spacing-md) 0',
                   color: 'var(--text-primary)',
@@ -985,9 +1046,9 @@ const ActiveSession: React.FC = () => {
                 </h4>
                 
                 {/* AI-Inferred Tasks */}
-                {latestAIResult.result?.inferredTasks?.length > 0 && (
+                {latestAIResult.result?.keyTasks?.length > 0 && (
                   <div style={{ marginBottom: 'var(--spacing-md)' }}>
-                    {latestAIResult.result.inferredTasks.map((task: string, index: number) => (
+                    {latestAIResult.result.keyTasks.map((task: string, index: number) => (
                       <div key={index} style={{
                         display: 'flex',
                         alignItems: 'flex-start',
@@ -1012,7 +1073,7 @@ const ActiveSession: React.FC = () => {
                 )}
 
                 {/* Fallback to Summary if no specific tasks */}
-                {(!latestAIResult.result?.inferredTasks?.length || latestAIResult.result.inferredTasks.length === 0) && latestAIResult.result?.summary && (
+                {(!latestAIResult.result?.keyTasks?.length || latestAIResult.result.keyTasks.length === 0) && latestAIResult.result?.summary && (
                   <div style={{
                     padding: 'var(--spacing-md)',
                     background: 'var(--bg-tertiary)',
@@ -1178,6 +1239,323 @@ const ActiveSession: React.FC = () => {
                     </div>
                   </div>
                 )}
+              </div>
+            </div>
+
+            {/* Suggestions Section */}
+            {latestAIResult.result?.suggestions && latestAIResult.result.suggestions.length > 0 && (
+              <div style={{
+                padding: 'var(--spacing-lg)',
+                borderTop: '1px solid var(--border-color)',
+                background: 'var(--bg-panel)'
+              }}>
+                <h4 style={{
+                  margin: '0 0 var(--spacing-md) 0',
+                  color: 'var(--text-primary)',
+                  fontSize: 'var(--font-md)',
+                  fontWeight: '600',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 'var(--spacing-sm)'
+                }}>
+                  💡 AI Suggestions
+                </h4>
+                
+                <div style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 'var(--spacing-sm)'
+                }}>
+                  {latestAIResult.result.suggestions.map((suggestion: string, index: number) => (
+                    <div key={index} style={{
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: 'var(--spacing-sm)',
+                      padding: 'var(--spacing-md)',
+                      background: 'var(--accent-purple)10',
+                      borderRadius: 'var(--radius-md)',
+                      border: '1px solid var(--accent-purple)20'
+                    }}>
+                      <div style={{
+                        width: '20px',
+                        height: '20px',
+                        borderRadius: '50%',
+                        background: 'var(--accent-purple)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '12px',
+                        color: 'white',
+                        fontWeight: 'bold',
+                        flexShrink: 0
+                      }}>
+                        💡
+                      </div>
+                      <div style={{
+                        color: 'var(--text-primary)',
+                        fontSize: 'var(--font-sm)',
+                        lineHeight: '1.5',
+                        flex: 1
+                      }}>
+                        {suggestion}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* AI-Detected Completed Tasks */}
+        {latestAIResult?.result?.completedTodos?.length > 0 && (
+          <div style={{
+            background: 'var(--bg-panel)',
+            border: '1px solid var(--border-color)',
+            borderRadius: 'var(--radius-lg)',
+            marginBottom: 'var(--spacing-xl)',
+            overflow: 'hidden'
+          }}>
+            {/* Header */}
+            <div style={{ 
+              padding: 'var(--spacing-lg)',
+              borderBottom: '1px solid var(--border-color)',
+              background: 'linear-gradient(135deg, var(--info-color)10, var(--info-color)05)'
+            }}>
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 'var(--spacing-md)'
+              }}>
+                <div style={{
+                  width: '32px',
+                  height: '32px',
+                  borderRadius: '50%',
+                  background: 'var(--info-color)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '16px',
+                  color: 'white'
+                }}>
+                  🤖
+                </div>
+                <div>
+                  <h3 style={{
+                    margin: 0,
+                    fontSize: 'var(--font-lg)',
+                    fontWeight: '600',
+                    color: 'var(--text-primary)'
+                  }}>
+                    AI-Detected Completed Tasks
+                  </h3>
+                  <p style={{
+                    margin: 0,
+                    fontSize: 'var(--font-sm)',
+                    color: 'var(--text-secondary)'
+                  }}>
+                    Review and approve tasks the AI thinks you completed
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Content */}
+            <div style={{ padding: 'var(--spacing-lg)' }}>
+              <div style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 'var(--spacing-md)'
+              }}>
+                {latestAIResult.result.completedTodos.map((task: string, index: number) => (
+                  <div key={index} style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: 'var(--spacing-md)',
+                    background: 'var(--info-color)10',
+                    borderRadius: 'var(--radius-md)',
+                    border: '2px solid var(--info-color)30',
+                    borderLeft: '4px solid var(--info-color)'
+                  }}>
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 'var(--spacing-sm)',
+                      flex: 1
+                    }}>
+                      <div style={{
+                        width: '24px',
+                        height: '24px',
+                        borderRadius: '50%',
+                        background: 'var(--info-color)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '12px',
+                        color: 'white',
+                        fontWeight: 'bold'
+                      }}>
+                        AI
+                      </div>
+                      <span style={{
+                        color: 'var(--text-primary)',
+                        fontSize: 'var(--font-base)',
+                        fontWeight: '500'
+                      }}>
+                        {task}
+                      </span>
+                    </div>
+                    
+                    <div style={{
+                      display: 'flex',
+                      gap: 'var(--spacing-sm)'
+                    }}>
+                      <button
+                        onClick={() => {
+                          // Add to user's completed todos and mark as completed
+                          const { addTodo, completeTodo } = useSessionStore.getState();
+                          addTodo(task);
+                          
+                          // Complete it immediately with AI detection source
+                          completeTodo(task, 'user', 'definite');
+                          
+                          // Remove this task from the AI results completely
+                          setAiResults((prev: any[]) => 
+                            prev.map((result: any) => {
+                              if (result === latestAIResult && result.result?.completedTodos) {
+                                return {
+                                  ...result,
+                                  result: {
+                                    ...result.result,
+                                    completedTodos: result.result.completedTodos.filter((_: any, i: number) => i !== index)
+                                  }
+                                };
+                              }
+                              return result;
+                            })
+                          );
+                          
+                          setLatestAIResult((prev: any) => {
+                            if (!prev?.result?.completedTodos) return prev;
+                            const newResult = {
+                              ...prev,
+                              result: {
+                                ...prev.result,
+                                completedTodos: prev.result.completedTodos.filter((_: any, i: number) => i !== index)
+                              }
+                            };
+                            return newResult.result.completedTodos.length > 0 ? newResult : null;
+                          });
+                          
+                          console.log(`✅ Approved and completed AI-detected task: "${task}"`);
+                        }}
+                        style={{
+                          padding: 'var(--spacing-xs) var(--spacing-sm)',
+                          background: 'var(--success-color)',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: 'var(--radius-sm)',
+                          fontSize: 'var(--font-sm)',
+                          cursor: 'pointer',
+                          fontWeight: '500'
+                        }}
+                      >
+                        ✅ Approve
+                      </button>
+                      
+                      <button
+                        onClick={() => {
+                          // Reject the task and send feedback to AI for learning
+                          const rejectionFeedback = {
+                            task,
+                            reason: 'user_rejected',
+                            context: 'task_not_actually_completed',
+                            timestamp: new Date().toISOString()
+                          };
+                          
+                          // Store rejection for AI learning
+                          if (window.electronAPI?.tracker?.recordTaskRejection) {
+                            window.electronAPI.tracker.recordTaskRejection(rejectionFeedback);
+                          }
+                          
+                          // Remove this task from the AI results
+                          setAiResults((prev: any[]) => 
+                            prev.map((result: any) => {
+                              if (result === latestAIResult && result.result?.completedTodos) {
+                                return {
+                                  ...result,
+                                  result: {
+                                    ...result.result,
+                                    completedTodos: result.result.completedTodos.filter((_: any, i: number) => i !== index)
+                                  }
+                                };
+                              }
+                              return result;
+                            })
+                          );
+                          
+                          setLatestAIResult((prev: any) => {
+                            if (!prev?.result?.completedTodos) return prev;
+                            const newResult = {
+                              ...prev,
+                              result: {
+                                ...prev.result,
+                                completedTodos: prev.result.completedTodos.filter((_: any, i: number) => i !== index)
+                              }
+                            };
+                            return newResult.result.completedTodos.length > 0 ? newResult : null;
+                          });
+                          
+                          console.log(`❌ Rejected AI-detected task: "${task}"`);
+                        }}
+                        style={{
+                          padding: 'var(--spacing-xs) var(--spacing-sm)',
+                          background: 'var(--error-color)',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: 'var(--radius-sm)',
+                          fontSize: 'var(--font-sm)',
+                          cursor: 'pointer',
+                          fontWeight: '500'
+                        }}
+                      >
+                        ❌ Reject
+                      </button>
+                      
+                      <button
+                        onClick={() => {
+                          // Add to user's todos but don't complete
+                          const { addTodo } = useSessionStore.getState();
+                          addTodo(task);
+                          console.log(`📝 Added AI-detected task to todos: "${task}"`);
+                        }}
+                        style={{
+                          padding: 'var(--spacing-xs) var(--spacing-sm)',
+                          background: 'var(--bg-secondary)',
+                          color: 'var(--text-secondary)',
+                          border: '1px solid var(--border-color)',
+                          borderRadius: 'var(--radius-sm)',
+                          fontSize: 'var(--font-sm)',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        📝 Add to Todos
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                
+                <div style={{
+                  padding: 'var(--spacing-sm)',
+                  background: 'var(--bg-tertiary)',
+                  borderRadius: 'var(--radius-sm)',
+                  fontSize: 'var(--font-xs)',
+                  color: 'var(--text-secondary)',
+                  textAlign: 'center'
+                }}>
+                  💡 AI detected these tasks based on your activity. Review and approve if correct!
+                </div>
               </div>
             </div>
           </div>
@@ -1578,26 +1956,36 @@ const ActiveSession: React.FC = () => {
         {/* Session Controls */}
         <div className="session-controls" style={{
           display: 'flex',
-          justifyContent: 'center',
-          gap: 'var(--spacing-lg)',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: 'var(--spacing-md)',
           marginTop: 'var(--spacing-xl)',
           padding: 'var(--spacing-lg)'
         }}>
           <button
             className={`button ${isOnBreak ? 'button-primary' : 'button-secondary'}`}
-            onClick={isOnBreak ? endBreak : startBreak}
+            onClick={async () => {
+              if (isOnBreak) {
+                await endBreak();
+              } else {
+                await startBreak();
+              }
+            }}
             style={{ 
               display: 'flex',
               alignItems: 'center',
               gap: 'var(--spacing-sm)',
-              padding: 'var(--spacing-md) var(--spacing-lg)',
+              padding: 'var(--spacing-md) var(--spacing-xl)',
               borderRadius: 'var(--radius-md)',
               fontSize: 'var(--font-base)',
               fontWeight: 'var(--font-weight-medium)',
               cursor: 'pointer',
               border: '1px solid var(--border-color)',
-              background: isOnBreak ? 'var(--success-color)' : 'var(--warning-color)',
-              color: 'white'
+              background: isOnBreak ? 'var(--success-color)' : '#f59e0b',
+              color: 'white',
+              minWidth: '200px',
+              justifyContent: 'center',
+              transition: 'all 0.2s ease'
             }}
           >
             {isOnBreak ? (
@@ -1619,14 +2007,17 @@ const ActiveSession: React.FC = () => {
               display: 'flex',
               alignItems: 'center',
               gap: 'var(--spacing-sm)',
-              padding: 'var(--spacing-md) var(--spacing-lg)',
+              padding: 'var(--spacing-md) var(--spacing-xl)',
               borderRadius: 'var(--radius-md)',
               fontSize: 'var(--font-base)',
               fontWeight: 'var(--font-weight-medium)',
               cursor: 'pointer',
-              border: '1px solid var(--error-color)',
-              background: 'var(--error-color)',
-              color: 'white'
+              border: '1px solid #6b7280',
+              background: '#6b7280',
+              color: 'white',
+              minWidth: '200px',
+              justifyContent: 'center',
+              transition: 'all 0.2s ease'
             }}
           >
             <IconPlayerStop size={18} />

@@ -29,6 +29,19 @@ const Login = () => {
 
   return (
     <div className="login-page">
+      {/* Simple draggable region for window controls */}
+      <div 
+        className="draggable-region" 
+        style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          height: '32px',
+          zIndex: 1000
+        }}
+      />
+      
       {/* Simple Background */}
       <div className="login-background" />
       

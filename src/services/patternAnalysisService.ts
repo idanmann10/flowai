@@ -146,7 +146,7 @@ export class PatternAnalysisService {
       const productivityPattern = this.analyzeWeeklyProductivityPattern(dailyData);
 
       // Generate insights
-      const keyInsights = this.generateWeeklyInsights(dailyData, summaries);
+      const keyInsights = this.generateWeeklyInsightsList(dailyData, summaries);
       const improvements = this.generateWeeklyImprovements(dailyData, summaries);
 
       return {
@@ -439,7 +439,7 @@ export class PatternAnalysisService {
     return secondAvg - firstAvg;
   }
 
-  private generateWeeklyInsights(dailyData: Record<string, any[]>, summaries: any[]): string[] {
+  private generateWeeklyInsightsList(dailyData: Record<string, any[]>, summaries: any[]): string[] {
     const insights: string[] = [];
     
     const totalSessions = summaries.length;
@@ -448,7 +448,7 @@ export class PatternAnalysisService {
     const avgProductivity = summaries.reduce((sum, s) => sum + (s.productivity_score || 0), 0) / summaries.length;
     if (avgProductivity > 75) {
       insights.push('Excellent week with high productivity levels');
-    } else if (avgProductivity > 60) {
+    } else if (avgProductivity > 70) {
       insights.push('Good week with solid productivity');
     } else {
       insights.push('Room for improvement in focus and productivity');

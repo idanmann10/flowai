@@ -227,7 +227,7 @@ export const useSessionSummaryStore = create<SessionSummaryStore>((set, get) => 
         const summariesWithChunks = intervalSummaries.map((summary, index) => ({
           ...summary,
           chunk_number: summary.chunk_number || index + 1,
-          time_window: summary.time_window || `Interval ${summary.chunk_number || index + 1} (2-min AI summary)`,
+          time_window: summary.time_window || `Interval ${summary.chunk_number || index + 1} (10-min AI summary)`,
           summary_type: 'interval'
         }))
         
@@ -278,7 +278,7 @@ export const useSessionSummaryStore = create<SessionSummaryStore>((set, get) => 
       time_window: summary.time_window || 
         (summary.summary_type === 'final' 
           ? 'Final Session Summary'
-          : `Interval ${summary.chunk_number || intervalSummaries.length + 1} (2-min AI summary)`),
+                      : `Interval ${summary.chunk_number || intervalSummaries.length + 1} (10-min AI summary)`),
       summary_type: summary.summary_type || 'interval'
     }
     
@@ -332,14 +332,14 @@ export const useSessionSummaryStore = create<SessionSummaryStore>((set, get) => 
     concatenated += `==========================\n\n`
     concatenated += `Duration: ${formatDuration(sessionDuration)}\n`
     concatenated += `Start Time: ${sessionStartTime?.toLocaleString() || 'Unknown'}\n`
-    concatenated += `2-Minute AI Intervals: ${intervalSummaries.length}\n`
+    concatenated += `10-Minute AI Intervals: ${intervalSummaries.length}\n`
     if (avgScore !== null) {
       concatenated += `Average Productivity Score: ${avgScore}/100\n`
     }
     concatenated += `\n`
     
     if (intervalSummaries.length > 0) {
-      concatenated += `2-MINUTE AI PRODUCTIVITY INTERVALS:\n`
+      concatenated += `10-MINUTE AI PRODUCTIVITY INTERVALS:\n`
       concatenated += `===================================\n\n`
       
       intervalSummaries.forEach((summary) => {

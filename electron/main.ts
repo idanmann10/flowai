@@ -26,7 +26,7 @@ try {
   // Try to load AI Summary Service
   try {
     console.log('🔍 MAIN DEBUG: Loading AI Summary Service...')
-    const { aiSummaryService: aiService } = require('../dist/services/aiSummaryService')
+    const { aiSummaryService: aiService } = require('./aiSummaryService')
     aiSummaryService = aiService
     console.log('✅ MAIN: AI Summary Service loaded successfully')
   } catch (aiError) {
@@ -230,6 +230,73 @@ function setupTrackerIPC() {
   console.log('  - tracker:getAISummaries')
   console.log('  - tracker:updateSessionTodos')
   console.log('  - tracker:getStatus')
+  
+  // AI Task Rejection Learning
+  ipcMain.handle('record-task-rejection', async (event, rejectionData) => {
+    try {
+      console.log('📝 Recording task rejection for AI learning:', rejectionData);
+      
+      // Store rejection in a file for AI learning
+      const fs = require('fs');
+      const path = require('path');
+      
+      const rejectionsFile = path.join(__dirname, '..', 'ai-rejections.json');
+      let rejections = [];
+      
+      try {
+        if (fs.existsSync(rejectionsFile)) {
+          rejections = JSON.parse(fs.readFileSync(rejectionsFile, 'utf8'));
+        }
+      } catch (e) {
+        console.log('Creating new rejections file');
+      }
+      
+      rejections.push({
+        ...rejectionData,
+        timestamp: new Date().toISOString()
+      });
+      
+      fs.writeFileSync(rejectionsFile, JSON.stringify(rejections, null, 2));
+      console.log('✅ Task rejection recorded for AI learning');
+      
+      return { success: true };
+    } catch (error) {
+      console.error('❌ Error recording task rejection:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  // AI Todo Completion Check
+  ipcMain.handle('ask-todo-completion', async (event, data) => {
+    try {
+      console.log('🤖 AI asking about todo completion:', data);
+      
+      // Send the prompt to AI for analysis
+      if (!aiSummaryService) {
+        console.error('❌ AI Summary Service not available');
+        return { success: false, error: 'AI service not available' };
+      }
+      
+      const response = await aiSummaryService.processSimplePrompt(data.prompt);
+      
+      if (response) {
+                 // Send the AI response back to the frontend for user confirmation
+         const allWindows = BrowserWindow.getAllWindows();
+         if (allWindows.length > 0) {
+           allWindows[0].webContents.send('todo-completion-suggestion', {
+            todos: data.todos,
+            aiResponse: response,
+            timestamp: data.timestamp
+          });
+        }
+      }
+      
+      return { success: true };
+    } catch (error) {
+      console.error('❌ Error asking about todo completion:', error);
+      return { success: false, error: error.message };
+    }
+  });
 }
 
 // Handle AI processing requests from TrackerStore
@@ -303,7 +370,7 @@ function createWindow() {
     title: 'Flow AI', // Set window title for native titlebar
     icon: isDev 
       ? path.join(__dirname, '../icon.icns')
-      : path.join(__dirname, 'electron.icns'),
+      : path.join(__dirname, '../icon.icns'),
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: true,
@@ -360,7 +427,7 @@ function createWindow() {
 function createTray() {
   const iconPath = isDev 
     ? path.join(__dirname, '../icon.icns')
-    : path.join(__dirname, 'electron.icns')
+    : path.join(__dirname, '../icon.icns')
 
   tray = new Tray(iconPath)
   const contextMenu = Menu.buildFromTemplate([
@@ -608,8 +675,8 @@ ipcMain.handle('session:pause', async (_, reason = 'manual') => {
       throw new Error('TrackerStore system not available')
     }
     
-    // TrackerStore doesn't have pause functionality, so we'll just return success
-    const result = { success: true, reason }
+    // Actually pause the tracker
+    const result = await trackerStore.pauseSession(reason)
     
     if (result.success) {
       console.log(`⏸️ MAIN: Session paused (${reason})`)
@@ -641,8 +708,8 @@ ipcMain.handle('session:resume', async () => {
       throw new Error('TrackerStore system not available')
     }
     
-    // TrackerStore doesn't have resume functionality, so we'll just return success
-    const result = { success: true }
+    // Actually resume the tracker
+    const result = await trackerStore.resumeSession()
     
     if (result.success) {
       console.log('▶️ MAIN: Session resumed')

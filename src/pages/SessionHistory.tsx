@@ -45,6 +45,7 @@ interface Session {
   break_count: number;
   // Final summary fields
   stars?: number;
+  session_overview?: string;
   final_summary?: string;
   improvement_trend?: 'improved' | 'declined' | 'stable';
   improvement_percentage?: number;
@@ -61,6 +62,23 @@ interface Session {
   focus_score?: number;
   energy_level?: string;
   engagement_score?: number;
+  // AI Comprehensive Analysis fields
+  ai_comprehensive_summary?: string;
+  ai_productivity_insights?: string[];
+  ai_recommendations?: string[];
+  app_time_breakdown?: Record<string, number>;
+  distraction_events?: string[];
+  planned_todos?: string[];
+  completed_todos?: string[];
+  uncompleted_todos?: string[];
+  flow_state_duration?: number;
+  deep_work_periods?: Array<{ start: string; end: string; duration: number }>;
+  break_analysis?: {
+    totalBreaks: number;
+    averageBreakLength: number;
+    longestBreak: number;
+    shortestBreak: number;
+  };
 }
 
 const SessionHistory: React.FC = () => {
@@ -72,6 +90,48 @@ const SessionHistory: React.FC = () => {
   const [sessionAISummaries, setSessionAISummaries] = useState<any[]>([])
   const [loadingSummaries, setLoadingSummaries] = useState(false)
   const [groupedSessions, setGroupedSessions] = useState<any[]>([])
+
+  // Extract tasks from AI summaries - EXACTLY like EmployeeDashboard
+  const extractTasksFromSummaries = (summaries: any[]): string[] => {
+    const tasks: string[] = []
+    
+    summaries.forEach(summary => {
+      // Priority 1: Direct task completion data
+      if (summary.task_completion?.completed) {
+        tasks.push(...summary.task_completion.completed)
+      }
+      
+      // Priority 2: Look for task patterns in summary text
+      if (summary.summary_text) {
+        const text = summary.summary_text.toLowerCase()
+        
+        // Pattern 1: "completed [task]" or "finished [task]"
+        const completedMatches = text.match(/(?:completed|finished|done with|accomplished)\s+([^.!?]+)/gi)
+        if (completedMatches) {
+          completedMatches.forEach((match: string) => {
+            const task = match.replace(/^(completed|finished|done with|accomplished)\s+/i, '').trim()
+            if (task.length > 3 && task.length < 100) {
+              tasks.push(task)
+            }
+          })
+        }
+        
+        // Pattern 2: "✓ [task]" or "✅ [task]"
+        const checkMatches = text.match(/[✓✅]\s*([^.!?\n]+)/gi)
+        if (checkMatches) {
+          checkMatches.forEach((match: string) => {
+            const task = match.replace(/^[✓✅]\s*/, '').trim()
+            if (task.length > 3 && task.length < 100) {
+              tasks.push(task)
+            }
+          })
+        }
+      }
+    })
+    
+    // Remove duplicates and limit to 3 most relevant tasks
+    return [...new Set(tasks)].slice(0, 3)
+  }
 
   useEffect(() => {
     if (user) {
@@ -89,8 +149,8 @@ const SessionHistory: React.FC = () => {
       setLoading(true)
       setError(null)
       
-      // Fetch sessions from Supabase
-      const { data, error: fetchError } = await supabase
+      // Fetch sessions from Supabase - EXACTLY like EmployeeDashboard
+      const { data, error } = await supabase
         .from('sessions')
         .select(`
           id,
@@ -98,12 +158,14 @@ const SessionHistory: React.FC = () => {
           end_time,
           active_secs,
           idle_secs,
+          break_secs,
           ai_productivity_score,
           productivity_score,
           total_keystrokes,
           total_clicks,
           break_count,
           stars,
+          session_overview,
           final_summary,
           improvement_trend,
           improvement_percentage,
@@ -115,24 +177,73 @@ const SessionHistory: React.FC = () => {
           session_goal_completed,
           daily_goal,
           app_usage_summary,
+          app_time_breakdown,
           primary_app,
           focus_score,
           energy_level,
-          engagement_score
+          engagement_score,
+          flow_state_duration,
+          focus_interruptions,
+          ai_comprehensive_summary,
+          ai_productivity_insights,
+          ai_recommendations,
+          planned_todos,
+          completed_todos,
+          uncompleted_todos,
+          distraction_events,
+          deep_work_periods,
+          break_analysis
         `)
         .eq('user_id', user.id)
         .order('start_time', { ascending: false })
         .limit(50)
 
-      if (fetchError) {
-        throw new Error(`Failed to fetch sessions: ${fetchError.message}`)
+      if (error) throw error
+      
+      const sessions = data || []
+      
+      // For sessions without completed_tasks, try to fetch AI summaries to extract tasks - EXACTLY like EmployeeDashboard
+      const sessionsWithoutTasks = sessions.filter(session => 
+        !session.completed_tasks || session.completed_tasks.length === 0
+      )
+      
+      if (sessionsWithoutTasks.length > 0) {
+        const sessionIds = sessionsWithoutTasks.map(s => s.id)
+        const { data: aiSummaries } = await supabase
+          .from('ai_summaries')
+          .select('session_id, summary_text, task_completion')
+          .in('session_id', sessionIds)
+        
+        if (aiSummaries) {
+          // Group AI summaries by session
+          const summariesBySession = aiSummaries.reduce((acc, summary) => {
+            if (!acc[summary.session_id]) acc[summary.session_id] = []
+            acc[summary.session_id].push(summary)
+            return acc
+          }, {} as Record<string, any[]>)
+          
+          // Extract tasks from AI summaries for sessions without completed_tasks
+          sessions.forEach(session => {
+            if ((!session.completed_tasks || session.completed_tasks.length === 0) && 
+                summariesBySession[session.id]) {
+              const sessionSummaries = summariesBySession[session.id]
+              const extractedTasks = extractTasksFromSummaries(sessionSummaries)
+              if (extractedTasks.length > 0) {
+                session.completed_tasks = extractedTasks
+              }
+            }
+          })
+        }
       }
 
       // Transform the data to match our interface
-      const transformedSessions: Session[] = (data || []).map(session => {
+      const transformedSessions: Session[] = sessions.map(session => {
         const startTime = new Date(session.start_time)
         const endTime = session.end_time ? new Date(session.end_time) : new Date()
-        const durationMinutes = Math.round((endTime.getTime() - startTime.getTime()) / (1000 * 60))
+        
+        // Calculate duration from active and idle seconds instead of time difference
+        const totalSeconds = (session.active_secs || 0) + (session.idle_secs || 0)
+        const durationMinutes = Math.round(totalSeconds / 60)
         
         const focusTimeMinutes = Math.round((session.active_secs || 0) / 60)
         const totalTimeMinutes = durationMinutes
@@ -154,6 +265,7 @@ const SessionHistory: React.FC = () => {
           break_count: session.break_count || 0,
           // Final summary fields
           stars: session.stars,
+          session_overview: session.session_overview,
           final_summary: session.final_summary,
           improvement_trend: session.improvement_trend,
           improvement_percentage: session.improvement_percentage,
@@ -190,10 +302,15 @@ const SessionHistory: React.FC = () => {
   }
 
   const formatDuration = (minutes: number) => {
+    // Handle invalid input
+    if (!minutes || isNaN(minutes) || minutes < 0) {
+      return '0m'
+    }
+    
     const hours = Math.floor(minutes / 60)
     const mins = minutes % 60
     if (hours > 0) {
-    return `${hours}h ${mins}m`
+      return `${hours}h ${mins}m`
     }
     return `${mins}m`
   }
@@ -274,6 +391,12 @@ const SessionHistory: React.FC = () => {
     } finally {
       setLoadingSummaries(false)
     }
+  }
+
+  // Check if session should use AI summary (< 30 min) or final summary (>= 30 min)
+  const shouldUseAISummary = (session: Session) => {
+    const sessionDurationMins = Math.round((session.active_secs + session.idle_secs) / 60)
+    return sessionDurationMins < 30
   }
 
   // Extract completed tasks from AI summaries
@@ -397,13 +520,19 @@ const SessionHistory: React.FC = () => {
       }
     })
     
-    // Sort by confidence and remove duplicates
+    // Sort by confidence and remove duplicates with better deduplication
     const sortedCandidates = taskCandidates
       .sort((a, b) => b.confidence - a.confidence)
     
     const uniqueTasks: string[] = []
+    const seenTasks = new Set()
     
     sortedCandidates.forEach(candidate => {
+      const normalized = candidate.text.toLowerCase().trim()
+      
+      // Skip if already seen
+      if (seenTasks.has(normalized)) return
+      
       // Check if this task is similar to any already added task
       const isDuplicate = uniqueTasks.some(existingTask => 
         isSimilarTask(candidate.text, existingTask)
@@ -417,6 +546,7 @@ const SessionHistory: React.FC = () => {
           .trim()
         
         if (cleanedTask.length > 3 && cleanedTask.length < 100) {
+          seenTasks.add(normalized)
           uniqueTasks.push(cleanedTask)
         }
       }
@@ -425,13 +555,24 @@ const SessionHistory: React.FC = () => {
     return uniqueTasks.slice(0, 10) // Limit to 10 most relevant tasks
   }
 
-  // Generate intelligent recommendations based on session data
+  // Generate AI-only recommendations based on session data
   const generateRecommendations = (session: Session, summaries: any[]) => {
     const recommendations: string[] = []
     
-    // Priority 1: Use AI-generated recommendations from the database
+    // Priority 1: Use AI strategic recommendations from the database
+    if (session.ai_recommendations && session.ai_recommendations.length > 0) {
+      recommendations.push(...session.ai_recommendations)
+    }
+    
+    // Priority 2: Use AI-generated recommendations from the database (filter for AI ones)
     if (session.recommendations && session.recommendations.length > 0) {
-      recommendations.push(...session.recommendations)
+      // Filter to only include AI-generated recommendations (those with emojis or specific patterns)
+      const aiRecommendations = session.recommendations.filter(rec => 
+        rec.includes('💡') || rec.includes('📚') || rec.includes('📈') || rec.includes('⏰') ||
+        rec.includes('🎯') || rec.includes('🚀') || rec.includes('🔧') || rec.includes('💪') ||
+        rec.includes('recommend') || rec.includes('suggest') || rec.includes('try')
+      )
+      recommendations.push(...aiRecommendations)
     }
     
     // Priority 2: Extract recommendations from AI summaries
@@ -460,46 +601,33 @@ const SessionHistory: React.FC = () => {
       }
     })
     
-    // Add unique AI suggestions
-    const uniqueAiSuggestions = [...new Set(aiSuggestions)].slice(0, 3)
-    recommendations.push(...uniqueAiSuggestions)
+    // Add unique AI suggestions with better deduplication
+    const uniqueAiSuggestions: string[] = []
+    const seenSuggestions = new Set()
     
-    // Priority 3: Only add hardcoded recommendations if we have very few AI ones
-    if (recommendations.length < 2) {
-      const productivity = getSessionProductivity(session, sessionAISummaries as AISummary[])
-      const duration = session.duration
-
-      // Only generate recommendations if there are actionable insights
-      if (productivity < 70 && duration > 15) { // Only for sessions longer than 15 minutes
-        if (duration > 120) { // 2+ hours
-          recommendations.push("💡 Consider taking more regular breaks for longer sessions")
-        }
-        
-        // Check for distraction patterns in AI summaries
-        const hasDistractions = summaries.some(s => 
-          s.summary_text?.toLowerCase().includes('distracted') ||
-          s.summary_text?.toLowerCase().includes('switched between') ||
-          s.summary_text?.toLowerCase().includes('app switch')
-        )
-        
-        if (hasDistractions) {
-          recommendations.push("🎯 Focus on one app at a time to improve concentration")
-        }
-
-        // Check productivity score patterns
-        const avgProductivity = summaries.reduce((sum, s) => sum + (s.productivity_score || 0), 0) / summaries.length
-        if (avgProductivity < 50 && summaries.length > 0) {
-          recommendations.push("📚 Try breaking tasks into smaller, manageable chunks")
-        }
+    aiSuggestions.forEach(suggestion => {
+      const normalized = suggestion.toLowerCase().trim()
+      if (!seenSuggestions.has(normalized)) {
+        seenSuggestions.add(normalized)
+        uniqueAiSuggestions.push(suggestion)
       }
-
-      if (duration < 30 && productivity > 80) {
-        recommendations.push("⏰ Great focus! Consider longer sessions for deeper work")
+    })
+    
+    recommendations.push(...uniqueAiSuggestions.slice(0, 3))
+    
+    // Remove duplicates from final recommendations
+    const finalRecommendations: string[] = []
+    const seenFinal = new Set()
+    
+    recommendations.forEach(rec => {
+      const normalized = rec.toLowerCase().trim()
+      if (!seenFinal.has(normalized)) {
+        seenFinal.add(normalized)
+        finalRecommendations.push(rec)
       }
-    }
-
-    // Return unique recommendations, prioritizing AI ones
-    return [...new Set(recommendations)].slice(0, 4)
+    })
+    
+    return finalRecommendations.slice(0, 4) // Limit to 4 most relevant recommendations
   }
 
   const getTotalStats = () => {
@@ -666,6 +794,8 @@ const SessionHistory: React.FC = () => {
         </div>
       )}
 
+
+
       {/* Sessions List */}
       <div className="card">
         <div className="card-header">
@@ -768,9 +898,11 @@ const SessionHistory: React.FC = () => {
                                   </span>
                                   <span style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-xs)' }}>
                                     <IconActivity size={12} />
-                                    {Math.round(session.productivity_score)}%
+                                    {getSessionProductivity(session)}%
                                   </span>
                                 </div>
+                                
+
                               </div>
                             </div>
                             
@@ -935,7 +1067,7 @@ const SessionHistory: React.FC = () => {
                       color: 'var(--text-secondary)',
                       margin: 0
                     }}>
-                      Duration: {formatDuration(selectedSession.duration)}
+                      Duration: {formatDuration(Math.round((selectedSession.active_secs + selectedSession.idle_secs) / 60))}
                     </p>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-md)' }}>
@@ -995,7 +1127,7 @@ const SessionHistory: React.FC = () => {
                       color: 'var(--text-primary)',
                       marginBottom: 'var(--spacing-xs)'
                     }}>
-                      {sessionAISummaries.length > 0 ? calculateOverallAIProductivity(sessionAISummaries as AISummary[]) : selectedSession.productivity_score}%
+                      {sessionAISummaries.length > 0 ? calculateOverallAIProductivity(sessionAISummaries as AISummary[]) : getSessionProductivity(selectedSession)}%
                     </div>
                     <p style={{ 
                       fontSize: 'var(--font-small)',
@@ -1043,6 +1175,158 @@ const SessionHistory: React.FC = () => {
                   </div>
                 </div>
               </div>
+
+              {/* Session Summary - AI Summaries for <30min, Final Summary for >=30min */}
+              {shouldUseAISummary(selectedSession) ? (
+                sessionAISummaries.length > 0 && (
+                <div style={{ marginBottom: 'var(--spacing-lg)' }}>
+                  <h4 style={{
+                    fontSize: 'var(--font-base)',
+                    fontWeight: 'var(--font-weight-semibold)',
+                    color: 'var(--text-primary)',
+                    margin: '0 0 var(--spacing-md) 0'
+                  }}>
+                                              🤖 AI Session Analysis (&lt; 30 min)
+                    </h4>
+                    <div style={{
+                      padding: 'var(--spacing-md)',
+                      background: 'linear-gradient(135deg, rgba(123, 104, 238, 0.05), rgba(76, 175, 80, 0.05))',
+                      borderRadius: 'var(--radius-md)',
+                      border: '1px solid rgba(123, 104, 238, 0.2)',
+                      marginBottom: 'var(--spacing-md)'
+                    }}>
+                      {sessionAISummaries.map((summary: any, index: number) => (
+                        <div key={index} style={{ marginBottom: index < sessionAISummaries.length - 1 ? 'var(--spacing-md)' : 0 }}>
+                          <div style={{
+                            fontSize: 'var(--font-sm)',
+                            color: 'var(--text-muted)',
+                            marginBottom: 'var(--spacing-xs)'
+                          }}>
+                            Interval {index + 1} • {summary.productivity_score || 0}% productive
+                          </div>
+                          <p style={{
+                            fontSize: 'var(--font-base)',
+                            color: 'var(--text-primary)',
+                            margin: 0,
+                            lineHeight: '1.6',
+                            marginBottom: 'var(--spacing-sm)'
+                          }}>
+                            {summary.summary_text || summary.summary || 'No summary available'}
+                          </p>
+                          {summary.key_accomplishments && summary.key_accomplishments.length > 0 && (
+                            <div style={{ marginTop: 'var(--spacing-xs)' }}>
+                              <div style={{ fontSize: 'var(--font-xs)', color: 'var(--success-color)', fontWeight: '600' }}>
+                                ✅ Accomplished: {summary.key_accomplishments.join(', ')}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )
+              ) : (
+                selectedSession.session_overview && (
+                  <div style={{ marginBottom: 'var(--spacing-lg)' }}>
+                    <h4 style={{
+                      fontSize: 'var(--font-base)',
+                      fontWeight: 'var(--font-weight-semibold)',
+                      color: 'var(--text-primary)',
+                      margin: '0 0 var(--spacing-md) 0'
+                    }}>
+                      📋 Session Overview (≥ 30 min)
+                  </h4>
+                  <div style={{
+                    padding: 'var(--spacing-md)',
+                    background: 'var(--info-color)10',
+                    borderRadius: 'var(--radius-md)',
+                    border: '1px solid var(--info-color)20',
+                    marginBottom: 'var(--spacing-md)'
+                  }}>
+                    <p style={{
+                      fontSize: 'var(--font-base)',
+                      color: 'var(--text-primary)',
+                      margin: 0,
+                      lineHeight: '1.5',
+                      fontWeight: '500'
+                    }}>
+                      {selectedSession.session_overview}
+                    </p>
+                  </div>
+                </div>
+                )
+              )}
+
+              {/* AI Comprehensive Analysis (only for sessions >= 30 min) */}
+              {!shouldUseAISummary(selectedSession) && selectedSession.ai_comprehensive_summary && (
+                <div style={{ marginBottom: 'var(--spacing-lg)' }}>
+                  <h4 style={{
+                    fontSize: 'var(--font-base)',
+                    fontWeight: 'var(--font-weight-semibold)',
+                    color: 'var(--text-primary)',
+                    margin: '0 0 var(--spacing-md) 0'
+                  }}>
+                    🧠 Comprehensive AI Analysis (≥ 30 min)
+                  </h4>
+                  <div style={{
+                    padding: 'var(--spacing-md)',
+                    background: 'linear-gradient(135deg, rgba(123, 104, 238, 0.05), rgba(76, 175, 80, 0.05))',
+                    borderRadius: 'var(--radius-md)',
+                    border: '1px solid rgba(123, 104, 238, 0.2)',
+                    marginBottom: 'var(--spacing-md)'
+                  }}>
+                    <p style={{
+                      fontSize: 'var(--font-sm)',
+                      color: 'var(--text-primary)',
+                      margin: 0,
+                      lineHeight: '1.6',
+                      fontStyle: 'italic'
+                    }}>
+                      {selectedSession.ai_comprehensive_summary}
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* AI Productivity Insights */}
+              {selectedSession.ai_productivity_insights && selectedSession.ai_productivity_insights.length > 0 && (
+                <div style={{ marginBottom: 'var(--spacing-lg)' }}>
+                  <h4 style={{
+                    fontSize: 'var(--font-base)',
+                    fontWeight: 'var(--font-weight-semibold)',
+                    color: 'var(--text-primary)',
+                    margin: '0 0 var(--spacing-md) 0'
+                  }}>
+                    💡 Strategic Productivity Insights
+                  </h4>
+                  <div style={{
+                    padding: 'var(--spacing-md)',
+                    background: 'rgba(123, 104, 238, 0.05)',
+                    borderRadius: 'var(--radius-md)',
+                    border: '1px solid rgba(123, 104, 238, 0.2)',
+                    marginBottom: 'var(--spacing-md)'
+                  }}>
+                    <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                      {selectedSession.ai_productivity_insights!.map((insight: string, index: number) => (
+                        <li key={index} style={{
+                          fontSize: 'var(--font-sm)',
+                          color: 'var(--text-primary)',
+                          lineHeight: '1.6',
+                          marginBottom: index < selectedSession.ai_productivity_insights!.length - 1 ? 'var(--spacing-sm)' : 0,
+                          display: 'flex',
+                          alignItems: 'flex-start',
+                          gap: 'var(--spacing-xs)'
+                        }}>
+                          <span style={{ color: 'var(--accent-purple)', fontWeight: 'bold' }}>•</span>
+                          <span>{insight}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              )}
+
+
 
               {/* Final Summary Section */}
               {selectedSession.final_summary && (
@@ -1095,27 +1379,44 @@ const SessionHistory: React.FC = () => {
                     </div>
                   )}
 
-                  {/* Completed Tasks from AI Analysis - Collapsible */}
-                  {sessionAISummaries.length > 0 && getCompletedTasks(sessionAISummaries).length > 0 && (
-                    <details style={{
-                      marginBottom: 'var(--spacing-md)',
-                      background: 'var(--bg-secondary)',
-                      border: '1px solid var(--border-color)',
-                      borderRadius: 'var(--radius-md)',
-                      padding: 'var(--spacing-sm)'
-                    }}>
-                      <summary style={{
-                        cursor: 'pointer',
-                        fontWeight: 'var(--font-weight-medium)',
-                        color: 'var(--text-primary)',
-                        fontSize: 'var(--font-sm)',
-                        padding: 'var(--spacing-xs)',
-                        listStyle: 'none'
-                      }}>
-                        📋 Completed Tasks ({getCompletedTasks(sessionAISummaries).length}) ▼
-                      </summary>
-                      <div style={{ marginTop: 'var(--spacing-sm)', paddingLeft: 'var(--spacing-md)' }}>
-                        {getCompletedTasks(sessionAISummaries).map((task, i) => (
+                  {/* Unified Completed Tasks (AI-only, deduplicated) */}
+                  {(() => {
+                    const allTasks: string[] = []
+                    
+                    // Add tasks from session data (AI-generated)
+                    if (selectedSession.completed_tasks && selectedSession.completed_tasks.length > 0) {
+                      allTasks.push(...selectedSession.completed_tasks)
+                    }
+                    
+                    // Add tasks from AI summaries (also AI-generated)
+                    if (sessionAISummaries.length > 0) {
+                      const aiTasks = getCompletedTasks(sessionAISummaries)
+                      allTasks.push(...aiTasks)
+                    }
+                    
+                    // Deduplicate tasks
+                    const uniqueTasks: string[] = []
+                    const seenTasks = new Set()
+                    
+                    allTasks.forEach(task => {
+                      const normalized = task.toLowerCase().trim()
+                      if (!seenTasks.has(normalized)) {
+                        seenTasks.add(normalized)
+                        uniqueTasks.push(task)
+                      }
+                    })
+                    
+                    return uniqueTasks.length > 0 ? (
+                      <div style={{ marginBottom: 'var(--spacing-md)' }}>
+                        <h5 style={{
+                          fontSize: 'var(--font-sm)',
+                          fontWeight: 'var(--font-weight-medium)',
+                          color: 'var(--text-primary)',
+                          margin: '0 0 var(--spacing-xs) 0'
+                        }}>
+                          📋 Completed Tasks ({uniqueTasks.length})
+                        </h5>
+                        {uniqueTasks.slice(0, 8).map((task, i) => (
                           <div key={i} style={{
                             fontSize: 'var(--font-xs)',
                             color: 'var(--text-secondary)',
@@ -1128,17 +1429,24 @@ const SessionHistory: React.FC = () => {
                             <span>{task}</span>
                           </div>
                         ))}
+                        {uniqueTasks.length > 8 && (
+                          <div style={{
+                            fontSize: 'var(--font-xs)',
+                            color: 'var(--text-muted)',
+                            fontStyle: 'italic'
+                          }}>
+                            +{uniqueTasks.length - 8} more tasks completed
+                          </div>
+                        )}
                       </div>
-                    </details>
-                  )}
+                    ) : null
+                  })()}
                   
-                  {/* Enhanced Recommendations */}
+                  {/* Unified AI Recommendations (deduplicated) */}
                   {(() => {
-                    const aiRecommendations = generateRecommendations(selectedSession, sessionAISummaries)
-                    const dbRecommendations = selectedSession.recommendations || []
-                    const allRecommendations = [...aiRecommendations, ...dbRecommendations].slice(0, 4)
+                    const recommendations = generateRecommendations(selectedSession, sessionAISummaries)
                     
-                    return allRecommendations.length > 0 ? (
+                    return recommendations.length > 0 ? (
                       <details style={{
                         marginBottom: 'var(--spacing-md)',
                         background: 'var(--bg-secondary)',
@@ -1154,30 +1462,20 @@ const SessionHistory: React.FC = () => {
                           padding: 'var(--spacing-xs)',
                           listStyle: 'none'
                         }}>
-                          💡 Intelligent Recommendations ({allRecommendations.length}) ▼
+                          💡 AI Recommendations ({recommendations.length}) ▼
                         </summary>
                         <div style={{ marginTop: 'var(--spacing-sm)', paddingLeft: 'var(--spacing-md)' }}>
-                          {allRecommendations.map((recommendation, i) => (
+                          {recommendations.map((recommendation, i) => (
                             <div key={i} style={{
                               fontSize: 'var(--font-xs)',
                               color: 'var(--text-secondary)',
                               marginBottom: 'var(--spacing-xs)',
                               padding: 'var(--spacing-xs)',
-                              background: i < aiRecommendations.length ? 'var(--info-color)10' : 'var(--bg-tertiary)',
+                              background: i < recommendations.length ? 'var(--info-color)10' : 'var(--bg-tertiary)',
                               borderRadius: 'var(--radius-sm)',
-                              border: i < aiRecommendations.length ? '1px solid var(--info-color)30' : '1px solid var(--border-color)'
+                              border: '1px solid var(--border-color)'
                             }}>
                               {recommendation}
-                              {i < aiRecommendations.length && (
-                                <span style={{ 
-                                  fontSize: '10px', 
-                                  color: 'var(--info-color)', 
-                                  marginLeft: 'var(--spacing-xs)',
-                                  fontWeight: 'bold'
-                                }}>
-                                  AI
-                                </span>
-                              )}
                             </div>
                           ))}
                         </div>
@@ -1247,7 +1545,7 @@ const SessionHistory: React.FC = () => {
                               padding: 'var(--spacing-xs) 0',
                               fontWeight: 'var(--font-weight-medium)'
                             }}>
-                              {formatAppUsageTime(seconds as number)}
+                              {formatAppUsageTime(Number(seconds))}
                             </div>
                           </React.Fragment>
                         ))}
@@ -1289,8 +1587,8 @@ const SessionHistory: React.FC = () => {
                       <div 
                         className="progress-bar-fill" 
                         style={{ 
-                          width: `${selectedSession.productivity_score}%`,
-                          backgroundColor: getProductivityColor(selectedSession.productivity_score)
+                          width: `${getSessionProductivity(selectedSession)}%`,
+                          backgroundColor: getProductivityColor(getSessionProductivity(selectedSession))
                         }}
                       />
                     </div>
@@ -1299,7 +1597,7 @@ const SessionHistory: React.FC = () => {
                       color: 'var(--text-muted)',
                       margin: '8px 0 0 0'
                     }}>
-                      Overall productivity: {selectedSession.productivity_score}% (Time-based calculation)
+                      Overall productivity: {getSessionProductivity(selectedSession)}% (Time-based calculation)
                     </p>
                   </div>
                 )}

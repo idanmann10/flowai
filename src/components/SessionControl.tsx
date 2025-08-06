@@ -22,6 +22,7 @@ export const SessionControl: React.FC = () => {
   const [sessionTodos, setSessionTodos] = useState<any[]>([]);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [resetSession, setResetSession] = useState(false);
+  const [isStarting, setIsStarting] = useState(false);
 
   // Update time every second
   useEffect(() => {
@@ -48,19 +49,31 @@ export const SessionControl: React.FC = () => {
   };
 
   const handleGoalsSubmit = async () => {
+    if (isStarting) return; // Prevent multiple calls
+    setIsStarting(true);
     setShowGoalsSetup(false);
-    await startSession();
-    navigate('/active-session');
+    try {
+      await startSession();
+      navigate('/active-session');
+    } finally {
+      setIsStarting(false);
+    }
   };
 
   const skipGoalsAndStart = async () => {
+    if (isStarting) return; // Prevent multiple calls
+    setIsStarting(true);
     setResetSession(true);
     setTimeout(() => setResetSession(false), 100);
     setSessionGoal(null);
     setSessionTodos([]);
     setShowGoalsSetup(false);
-    await startSession();
-    navigate('/active-session');
+    try {
+      await startSession();
+      navigate('/active-session');
+    } finally {
+      setIsStarting(false);
+    }
   };
 
   const handleGoalsTodosChange = (goal: any, todos: any[]) => {
@@ -124,14 +137,16 @@ export const SessionControl: React.FC = () => {
               <button 
                 className="btn btn-outline"
                 onClick={skipGoalsAndStart}
+                disabled={isStarting}
               >
-                Skip Goals & Start
+                {isStarting ? '⏳ Starting...' : 'Skip Goals & Start'}
               </button>
               <button 
                 className="btn btn-primary"
                 onClick={handleGoalsSubmit}
+                disabled={isStarting}
               >
-                🚀 Start Session
+                {isStarting ? '⏳ Starting...' : '🚀 Start Session'}
               </button>
             </div>
           </div>
@@ -227,7 +242,13 @@ export const SessionControl: React.FC = () => {
             <div className="session-controls">
               <button
                 className={`btn ${isOnBreak ? 'btn-primary' : 'btn-secondary'}`}
-                onClick={isOnBreak ? endBreak : startBreak}
+                onClick={async () => {
+                  if (isOnBreak) {
+                    await endBreak();
+                  } else {
+                    await startBreak();
+                  }
+                }}
               >
                 {isOnBreak ? '🚀 Resume Session' : '☕ Take Break'}
               </button>

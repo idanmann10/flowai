@@ -109,6 +109,7 @@ export const groupProductivityByHour = (aiSummaries: AISummary[]): HourlyProduct
     
     // Normalize productivity score to 0-100 range
     const normalizedScore = summary.productivity_score > 1 ? summary.productivity_score : summary.productivity_score * 100;
+    
     hourlyData[hourKey].productivityScores.push(normalizedScore);
     hourlyData[hourKey].summaryCount++;
   });
@@ -167,24 +168,41 @@ export const calculateCompletedTasks = (aiSummaries: AISummary[]): number => {
 export const getSessionProductivity = (session: any, aiSummaries?: AISummary[]): number => {
   // Priority 1: Use pre-calculated AI productivity if available
   if (session.ai_productivity_score) {
-    return session.ai_productivity_score;
+    const score = session.ai_productivity_score;
+    // Ensure score is within bounds and handle invalid values
+    if (typeof score === 'number' && !isNaN(score)) {
+      return Math.max(0, Math.min(100, Math.round(score)));
+    }
   }
   
   // Priority 2: Calculate from AI summaries if provided
   if (aiSummaries && aiSummaries.length > 0) {
     const aiProductivity = calculateOverallAIProductivity(aiSummaries);
-    if (aiProductivity > 0) return aiProductivity;
+    if (aiProductivity > 0) {
+      return Math.max(0, Math.min(100, aiProductivity));
+    }
   }
   
   // Priority 3: Use session's productivity_score if available
   if (session.productivity_score) {
     const score = session.productivity_score;
-    return score > 1 ? Math.round(score) : Math.round(score * 100);
+    if (typeof score === 'number' && !isNaN(score)) {
+      const normalizedScore = score > 1 ? Math.round(score) : Math.round(score * 100);
+      return Math.max(0, Math.min(100, normalizedScore));
+    }
   }
   
   // Priority 4: Fall back to time-based calculation
-  const total = (session.active_secs || 0) + (session.idle_secs || 0);
-  return total > 0 ? Math.round(((session.active_secs || 0) / total) * 100) : 0;
+  const activeSecs = session.active_secs || 0;
+  const idleSecs = session.idle_secs || 0;
+  const total = activeSecs + idleSecs;
+  
+  if (total > 0 && activeSecs >= 0 && idleSecs >= 0) {
+    const timeBasedScore = Math.round((activeSecs / total) * 100);
+    return Math.max(0, Math.min(100, timeBasedScore));
+  }
+  
+  return 0;
 };
 
 /**
@@ -193,6 +211,11 @@ export const getSessionProductivity = (session: any, aiSummaries?: AISummary[]):
  * @returns Formatted duration string
  */
 export const formatDuration = (seconds: number): string => {
+  // Handle invalid input
+  if (!seconds || isNaN(seconds) || seconds < 0) {
+    return '0m';
+  }
+  
   const hours = Math.floor(seconds / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
   

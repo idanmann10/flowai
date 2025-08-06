@@ -281,6 +281,124 @@ html, body, #root {
   -webkit-app-region: no-drag;
 }
 
+/* Custom Title Bar for hiddenInset style */
+.custom-titlebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  background: transparent;
+  z-index: 1000;
+  -webkit-app-region: drag;
+}
+
+.titlebar-drag-region {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  height: 100%;
+  -webkit-app-region: drag;
+}
+
+.titlebar-logo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 500;
+  -webkit-app-region: drag;
+}
+
+.titlebar-logo img {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+  -webkit-app-region: drag;
+}
+
+.titlebar-logo span {
+  -webkit-app-region: drag;
+}
+
+/* Window Controls */
+.titlebar-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  -webkit-app-region: no-drag;
+}
+
+.control-button {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+  -webkit-app-region: no-drag;
+}
+
+.control-button svg {
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  color: rgba(0, 0, 0, 0.7);
+}
+
+.control-button:hover svg {
+  opacity: 1;
+}
+
+.control-button.minimize {
+  background: #ffbd2e;
+}
+
+.control-button.minimize:hover {
+  background: #ffc73a;
+}
+
+.control-button.maximize {
+  background: #28c840;
+}
+
+.control-button.maximize:hover {
+  background: #2dd44c;
+}
+
+.control-button.close {
+  background: #ff5f57;
+}
+
+.control-button.close:hover {
+  background: #ff6b63;
+}
+
+/* Draggable region for native title bar */
+.draggable-region {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 32px;
+  -webkit-app-region: drag;
+  z-index: 1000;
+  pointer-events: none;
+}
+
+/* Make sure app content doesn't interfere with native title bar */
+.app-content {
+  -webkit-app-region: no-drag;
+  margin-top: 32px; /* Account for title bar height */
+}
+
 body {
   font-family: var(--font-body);
   background: var(--gradient-background);
@@ -502,6 +620,7 @@ input:focus, textarea:focus, select:focus, button:focus {
   display: flex;
   flex-direction: column;
   background: var(--bg-primary);
+  -webkit-app-region: no-drag;
 }
 
 /* App Layout */

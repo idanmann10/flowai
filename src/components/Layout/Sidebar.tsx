@@ -9,12 +9,14 @@ import {
   IconMessageCircle
 } from '@tabler/icons-react'
 import { useAuth } from '../../stores/authStore'
+import { useSessionStore } from '../../stores/sessionStore'
 import logoUrl from '../../assets/flow-ai-logo.png'
 
 const Sidebar: React.FC = () => {
   const location = useLocation()
   const navigate = useNavigate()
   const { user, signOut } = useAuth()
+  const { isActive } = useSessionStore()
 
   const navigationItems = [
     { 
@@ -42,7 +44,12 @@ const Sidebar: React.FC = () => {
   ]
 
   const handleNavigation = (path: string) => {
-    navigate(path)
+    // If navigating to dashboard and there's an active session, redirect to active session
+    if (path.includes('employee') && isActive) {
+      navigate('/active-session')
+    } else {
+      navigate(path)
+    }
   }
 
   const handleLogout = async () => {

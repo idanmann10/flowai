@@ -94,6 +94,8 @@ var currentDailyGoal = null;
 var currentSummaryId = null; // For AI memory tracking
 var currentUserId = null; // Store user ID for AI memory tracking
 var latestAIResults = [];
+// Track processed chunks to prevent duplicates
+var processedChunks = new Set();
 // Setup IPC handlers for tracker communication
 function setupTrackerIPC() {
     var _this = this;
@@ -129,6 +131,10 @@ function setupTrackerIPC() {
                     currentDailyGoal = dailyGoal;
                     currentSummaryId = summaryId; // Store for AI memory tracking
                     currentUserId = userId; // Store user ID for AI memory tracking
+                    
+                    // Clear processed chunks for new session
+                    processedChunks.clear();
+                    
                     console.log('✅ MAIN: TrackerStore system started successfully');
                     console.log('🆔 MAIN: Summary ID for AI memory:', summaryId);
                     console.log('👤 MAIN: User ID for AI memory:', userId);
@@ -281,101 +287,62 @@ function handleAIProcessingRequest(data) {
                     if (data.trackingData && data.trackingData.events) {
                         optimizedEvents = data.trackingData.events;
                         sessionId = data.sessionId;
+                        newEventsCount = data.trackingData.totalEvents;
                         chunkNumber = data.chunkNumber;
-                        newEventsCount = optimizedEvents.length;
-                        console.log("\uD83E\uDD16 MAIN: Processing ".concat(newEventsCount, " events from AI Summary Manager (chunk ").concat(chunkNumber, ")..."));
-                    } 
-                    // Handle data from tracker-store (legacy format)
-                    else if (data.optimizedEvents) {
+                        
+                        console.log(`🤖 MAIN: Processing ${newEventsCount} events from AI Summary Manager (chunk ${chunkNumber})...`);
+                        
+                        // Check for duplicate chunks
+                        const chunkKey = `${sessionId}_${chunkNumber}`;
+                        if (processedChunks.has(chunkKey)) {
+                            console.log(`⚠️ MAIN: Duplicate chunk detected - skipping chunk ${chunkNumber} for session ${sessionId}`);
+                            return [2 /*return*/];
+                        }
+                        processedChunks.add(chunkKey);
+                        
+                        // Process with AI
+                        return [4 /*yield*/, aiSummaryService.processOptimizedData(optimizedEvents, [], currentDailyGoal, sessionId)];
+                    }
+                    else {
+                        // Handle data from periodic processing (optimizedEvents structure)
                         optimizedEvents = data.optimizedEvents;
                         sessionId = data.sessionId;
                         newEventsCount = data.newEventsCount;
-                        chunkNumber = null;
-                        console.log("\uD83E\uDD16 MAIN: Processing ".concat(newEventsCount, " optimized events from tracker-store..."));
+                        
+                        console.log(`🤖 MAIN: Processing ${newEventsCount} events from periodic processing...`);
+                        
+                        // Process with AI
+                        return [4 /*yield*/, aiSummaryService.processOptimizedData(optimizedEvents, [], currentDailyGoal, sessionId)];
                     }
-                    else {
-                        console.error('❌ MAIN: Invalid data structure - no events found');
-                        return [2 /*return*/];
-                    }
-                    
-                    return [4 /*yield*/, aiSummaryService.processOptimizedData(optimizedEvents, currentSessionTodos, currentDailyGoal, currentUserId)];
                 case 1:
                     aiResult = _a.sent();
                     if (aiResult) {
                         console.log('✅ MAIN: AI processing completed:', aiResult);
                         
-                        // Store in AI memory for pattern recognition
-                        console.log('🧠 [AI MEMORY] Attempting to store in AI memory from main process...');
-                        try {
-                            // Send to renderer process for AI memory storage
-                            if (global.mainWindow && global.mainWindow.webContents) {
-                                global.mainWindow.webContents.send('store-ai-memory', {
-                                    analysis: aiResult,
-                                    userId: currentUserId,
-                                    sessionId: sessionId,
-                                    summaryId: currentSummaryId || `fallback_${sessionId}_${chunkNumber || latestAIResults.length + 1}`
-                                });
-                                console.log('✅ [AI MEMORY] Memory storage request sent to renderer process');
-                            }
-                        } catch (memoryError) {
-                            console.error('❌ [AI MEMORY] Failed to send memory storage request:', memoryError);
-                        }
-                        // Store the result
-                        latestAIResults.push({
-                            timestamp: new Date().toISOString(),
-                            sessionId: sessionId,
-                            eventsProcessed: newEventsCount,
-                            result: aiResult
-                        });
-                        // Keep only last 10 results to avoid memory issues
-                        if (latestAIResults.length > 10) {
-                            latestAIResults = latestAIResults.slice(-10);
-                        }
-                        // Save to Supabase (async - don't wait for completion)
-                        console.log('💾 MAIN: Initiating AI summary save to Supabase...');
-                        console.log('💾 MAIN: Session ID:', sessionId);
-                        console.log('💾 MAIN: AI Result keys:', Object.keys(aiResult));
-                        console.log('💾 MAIN: Events to save:', optimizedEvents.length);
-                        
-                        // Use chunk number from AI Summary Manager if available, otherwise use results length
-                        var finalChunkNumber = chunkNumber || latestAIResults.length;
-                        var promptUsed = 'Enhanced productivity analysis with lenient task completion';
-                        
-                        aiSummaryService.saveIntervalSummary(
-                            sessionId,
-                            currentUserId, // userId
-                            aiResult,
-                            { events: optimizedEvents },
-                            finalChunkNumber,
-                            promptUsed
-                        ).then(function(saved) {
-                            if (saved) {
-                                console.log('✅ MAIN: AI summary save completed successfully!');
-                                console.log('✅ MAIN: Chunk #' + finalChunkNumber + ' saved for session ' + sessionId);
-                            } else {
-                                console.error('❌ MAIN: AI summary save returned false');
-                            }
-                        }).catch(function(saveError) {
-                            console.error('❌ MAIN: AI summary save threw exception:', saveError);
-                            console.error('❌ MAIN: Exception details:', saveError.message);
-                        });
-                        // Send result to renderer process
-                        if (global.mainWindow && global.mainWindow.webContents) {
-                            global.mainWindow.webContents.send('ai-processing-result', {
-                                sessionId: sessionId,
+                        // Send AI result to renderer
+                        if (mainWindow) {
+                            mainWindow.webContents.send('ai-processing-result', {
                                 result: aiResult,
+                                sessionId: sessionId,
+                                chunkNumber: chunkNumber,
                                 timestamp: new Date().toISOString()
                             });
                         }
-                        console.log('✅ MAIN: AI result sent to renderer');
+                        
+                        // Save to database using aiSummaryService
+                        return [4 /*yield*/, aiSummaryService.saveIntervalSummary(sessionId, sessionId, aiResult, data.trackingData, chunkNumber, 'AI processing request')];
                     }
                     else {
-                        console.error('❌ MAIN: AI processing returned null result');
+                        console.log('❌ MAIN: AI processing returned null result');
                     }
                     return [3 /*break*/, 3];
                 case 2:
-                    error_3 = _a.sent();
-                    console.error('❌ MAIN: Error in AI processing:', error_3);
+                    saveResult = _a.sent();
+                    if (saveResult) {
+                        console.log('✅ MAIN: AI summary saved to database successfully');
+                    } else {
+                        console.error('❌ MAIN: Failed to save AI summary to database');
+                    }
                     return [3 /*break*/, 3];
                 case 3: return [2 /*return*/];
             }
@@ -389,8 +356,8 @@ function createWindow() {
         height: 800,
         frame: true, // Enable native window controls
         backgroundColor: '#0d0d14', // Set dark background color to match our theme
-        titleBarStyle: 'default', // Use default native title bar
-        title: 'LevelAI Desktop', // Set window title for native titlebar
+        titleBarStyle: 'hidden', // Transparent but draggable title bar
+        title: 'Flow AI', // Set window title for native titlebar
         webPreferences: {
             nodeIntegration: true,
             contextIsolation: true,

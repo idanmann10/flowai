@@ -1,5 +1,7 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../stores/authStore'
+import { useSessionStore } from '../stores/sessionStore'
 
 interface TeamMember {
   id: number
@@ -12,7 +14,17 @@ interface TeamMember {
 
 const ManagerDashboard = () => {
   const { user } = useAuth()
+  const { isActive } = useSessionStore()
+  const navigate = useNavigate()
   const [teamMembers] = useState<TeamMember[]>([])
+
+  // Auto-redirect to active session if session is active
+  useEffect(() => {
+    if (isActive) {
+      console.log('🔄 [MANAGER DASHBOARD] Active session detected, redirecting to active session');
+      navigate('/active-session');
+    }
+  }, [isActive, navigate])
 
   return (
     <div>

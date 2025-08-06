@@ -23,7 +23,7 @@ interface FlowMetrics {
 }
 
 export class FlowAnalyzer {
-  private readonly PRODUCTIVITY_THRESHOLD = 60;
+  private readonly PRODUCTIVITY_THRESHOLD = 70;
   private readonly IDLE_THRESHOLD = 300; // 5 minutes
   private readonly APP_SWITCHING_THRESHOLD = 8; // switches per minute
 
@@ -187,7 +187,7 @@ export class FlowAnalyzer {
     if (currentMetrics.productivity_score < 40) {
       strategies.push('Take a 5-minute break to reset your focus');
       strategies.push('Try the Pomodoro technique - work in 25-minute focused chunks');
-    } else if (currentMetrics.productivity_score < 60) {
+    } else if (currentMetrics.productivity_score < 70) {
       strategies.push('Eliminate distractions and focus on one task');
     }
 

@@ -5,6 +5,9 @@ import Sidebar from './Sidebar'
 const Layout: React.FC = () => {
   return (
     <div className="app-container">
+      {/* Simple draggable region for native title bar */}
+      <div className="draggable-region" />
+
       {/* Main Content Area */}
       <div className="app-content">
         {/* Sidebar */}

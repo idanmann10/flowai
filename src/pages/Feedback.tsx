@@ -396,51 +396,7 @@ const Feedback: React.FC = () => {
         </div>
       </div>
 
-      {/* Contact Info */}
-      <div className="card" style={{ 
-        background: 'linear-gradient(135deg, var(--bg-secondary), var(--bg-tertiary))',
-        marginTop: 'var(--spacing-xl)'
-      }}>
-        <div className="card-content">
-          <div style={{ textAlign: 'center' }}>
-            <h3 style={{ color: 'var(--text-primary)', marginBottom: 'var(--spacing-md)' }}>
-              Need immediate assistance?
-            </h3>
-            <p style={{ color: 'var(--text-secondary)', marginBottom: 'var(--spacing-lg)' }}>
-              For urgent issues or direct communication, you can also reach out to our team:
-            </p>
-            <div style={{ 
-              display: 'flex', 
-              justifyContent: 'center', 
-              gap: 'var(--spacing-lg)',
-              flexWrap: 'wrap'
-            }}>
-              <a 
-                href="mailto:support@levelai.app"
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 'var(--spacing-xs)',
-                  color: 'var(--accent-purple)',
-                  textDecoration: 'none',
-                  padding: 'var(--spacing-sm) var(--spacing-md)',
-                  borderRadius: 'var(--radius-md)',
-                  border: '1px solid var(--accent-purple)44',
-                  transition: 'all 0.2s ease'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = 'var(--accent-purple)22'
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'transparent'
-                }}
-              >
-                📧 support@levelai.app
-              </a>
-            </div>
-          </div>
-        </div>
-      </div>
+
     </div>
   )
 }

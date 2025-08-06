@@ -54,12 +54,15 @@
     }
   },
   "dependencies": {
+    "@floating-ui/dom": "^1.7.2",
     "@mantine/core": "^8.1.0",
     "@mantine/hooks": "^8.1.0",
     "@mantine/notifications": "^8.1.0",
     "@supabase/supabase-js": "^2.50.3",
     "@tabler/icons-react": "^3.34.0",
+    "canvas-confetti": "^1.9.3",
     "dotenv": "^17.0.1",
+    "electron-updater": "^6.6.2",
     "openai": "^5.9.2",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
@@ -71,6 +74,7 @@
     "@electron-forge/cli": "^7.2.0",
     "@electron-forge/maker-dmg": "^7.8.1",
     "@electron-forge/maker-zip": "^7.2.0",
+    "@types/canvas-confetti": "^1.9.0",
     "@types/react": "^18.2.37",
     "@types/react-dom": "^18.2.15",
     "@vitejs/plugin-react": "^4.2.0",

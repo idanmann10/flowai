@@ -123,35 +123,35 @@ const TitleBar: React.FC = () => {
   // Mac style (controls on left)
   if (platform === 'darwin') {
     return (
-      <div className="titlebar bg-background-primary border-b border-border-primary h-8 flex items-center justify-between px-4 select-none z-50">
+      <div className="titlebar bg-background-primary border-b border-border-primary h-8 flex items-center justify-between px-4 select-none z-50 group">
         {/* Mac Window Controls (Left) */}
-        <div className="flex items-center space-x-2">
+        <div className="flex items-center space-x-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
           <button
             onClick={handleClose}
-            className="w-3 h-3 rounded-full bg-red-500 hover:bg-red-600 transition-colors duration-200 flex items-center justify-center group"
+            className="w-3 h-3 rounded-full bg-red-500 hover:bg-red-600 transition-colors duration-200 flex items-center justify-center"
             aria-label="Close"
           >
-            <svg width="6" height="6" viewBox="0 0 6 6" className="opacity-0 group-hover:opacity-100 transition-opacity">
+            <svg width="6" height="6" viewBox="0 0 6 6" className="opacity-0 hover:opacity-100 transition-opacity">
               <path stroke="white" strokeWidth="1" d="M1,1 L5,5 M5,1 L1,5" />
             </svg>
           </button>
 
           <button
             onClick={handleMinimize}
-            className="w-3 h-3 rounded-full bg-yellow-500 hover:bg-yellow-600 transition-colors duration-200 flex items-center justify-center group"
+            className="w-3 h-3 rounded-full bg-yellow-500 hover:bg-yellow-600 transition-colors duration-200 flex items-center justify-center"
             aria-label="Minimize"
           >
-            <svg width="6" height="1" viewBox="0 0 6 1" className="opacity-0 group-hover:opacity-100 transition-opacity">
+            <svg width="6" height="1" viewBox="0 0 6 1" className="opacity-0 hover:opacity-100 transition-opacity">
               <rect width="6" height="1" fill="white" />
             </svg>
           </button>
 
           <button
             onClick={handleMaximize}
-            className="w-3 h-3 rounded-full bg-green-500 hover:bg-green-600 transition-colors duration-200 flex items-center justify-center group"
+            className="w-3 h-3 rounded-full bg-green-500 hover:bg-green-600 transition-colors duration-200 flex items-center justify-center"
             aria-label="Maximize"
           >
-            <svg width="6" height="6" viewBox="0 0 6 6" className="opacity-0 group-hover:opacity-100 transition-opacity">
+            <svg width="6" height="6" viewBox="0 0 6 6" className="opacity-0 hover:opacity-100 transition-opacity">
               <rect x="1" y="1" width="4" height="4" stroke="white" strokeWidth="0.5" fill="none" />
             </svg>
           </button>
@@ -170,14 +170,14 @@ const TitleBar: React.FC = () => {
 
   // Windows/Linux style (controls on right)
   return (
-    <div className="titlebar bg-background-primary border-b border-border-primary h-8 flex items-center justify-between px-4 select-none z-50">
+    <div className="titlebar bg-background-primary border-b border-border-primary h-8 flex items-center justify-between px-4 select-none z-50 group">
       {/* App Title (Left) */}
       <div className="flex items-center space-x-2">
         <img src={logoUrl} alt="Flow AI" className="w-8 h-5 object-contain" />
       </div>
 
       {/* Windows Window Controls (Right) */}
-      <div className="flex items-center">
+      <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity duration-200">
         <button
           onClick={handleMinimize}
           className="w-11 h-8 flex items-center justify-center hover:bg-surface-secondary transition-colors duration-200"

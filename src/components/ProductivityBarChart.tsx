@@ -55,8 +55,25 @@ const ProductivityBarChart: React.FC<ProductivityBarChartProps> = ({
       return `${item.day}: ${item.productivity}% (${item.sessions} sessions)`;
     } else if (view === 'monthly') {
       return `${item.week}: ${item.productivity}% (${item.sessions} sessions)`;
+    } else if (view === 'custom') {
+      return `${item.day}: ${item.productivity}% (${item.sessions} sessions)`;
     } else {
       return `${item.time || item.day || item.week}: ${item.productivity}%`;
+    }
+  };
+
+  // Get the appropriate label for each view
+  const getLabel = (item: any) => {
+    if (view === 'daily') {
+      return item.time; // Hour labels like "09:00", "10:00"
+    } else if (view === 'weekly') {
+      return item.day; // Day labels like "Mon", "Tue"
+    } else if (view === 'monthly') {
+      return item.week; // Week labels like "Week 1", "Week 2"
+    } else if (view === 'custom') {
+      return item.day; // Day labels like "Jul 15", "Jul 16"
+    } else {
+      return item.time || item.day || item.week;
     }
   };
 
@@ -96,7 +113,7 @@ const ProductivityBarChart: React.FC<ProductivityBarChartProps> = ({
                 style={{
                   width: '100%',
                   minWidth: 14,
-                  height: `${item.productivity * 2.1}px`,
+                  height: `${Math.max(item.productivity * 2.1, 4)}px`,
                   background: hoveredIndex === idx
                     ? 'linear-gradient(135deg, var(--accent-purple), #a78bfa)'
                     : 'linear-gradient(135deg, #6d28d9, #a78bfa)',
@@ -104,6 +121,7 @@ const ProductivityBarChart: React.FC<ProductivityBarChartProps> = ({
                   boxShadow: hoveredIndex === idx ? '0 6px 24px #a78bfa55' : '0 2px 8px #0002',
                   transition: 'all 0.2s cubic-bezier(.4,2,.6,1)',
                   position: 'relative',
+                  opacity: item.productivity === 0 ? 0.3 : 1,
                 }}
               />
               {/* Tooltip */}
@@ -111,7 +129,7 @@ const ProductivityBarChart: React.FC<ProductivityBarChartProps> = ({
                 <div
                   style={{
                     position: 'absolute',
-                    bottom: `${item.productivity * 2.1 + 16}px`,
+                    bottom: `${Math.max(item.productivity * 2.1, 4) + 16}px`,
                     left: '50%',
                     transform: 'translateX(-50%)',
                     background: '#23233b',
@@ -139,7 +157,7 @@ const ProductivityBarChart: React.FC<ProductivityBarChartProps> = ({
                   letterSpacing: 0.5,
                 }}
               >
-                {item.time || item.day || item.week}
+                {getLabel(item)}
               </span>
             </div>
           ))

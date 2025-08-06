@@ -17,7 +17,7 @@ import {
 } from '@tabler/icons-react'
 import { useSessionSummaryStore } from '../stores/sessionSummaryStore'
 import { useAuth } from '../stores/authStore'
-import { AnimatedStars } from '../components/ui'
+import { AnimatedStars, Fireworks, SparkleParticles } from '../components/ui'
 import { ProductivityGraph } from '../components/ProductivityGraph'
 import { notifications } from '@mantine/notifications'
 import { 
@@ -37,7 +37,7 @@ const SessionCompletion: React.FC = () => {
   const { user } = useAuth()
   const {
     showSummaryModal,
-    sessionDuration,
+    sessionDuration: totalSessionDuration,
     concatenatedSummary,
     aiSummaries,
     sessionStartTime,
@@ -46,6 +46,30 @@ const SessionCompletion: React.FC = () => {
     hideModal,
     loading
   } = useSessionSummaryStore()
+
+  // Get actual session data from sessionStore for accurate duration
+  const { startTime, currentMetrics, isOnBreak, breakStartTime } = useSessionStore()
+  
+  // Calculate actual session duration (active time only)
+  const getActualSessionDuration = () => {
+    if (!startTime) return 0
+    
+    const endTime = new Date()
+    const totalElapsed = Math.floor((endTime.getTime() - startTime.getTime()) / 1000)
+    
+    // Subtract break time to get active session time
+    const breakTimeSeconds = currentMetrics.breakTime
+    
+    // Add current break time if we're currently on break
+    let currentBreakTime = 0
+    if (isOnBreak && breakStartTime) {
+      currentBreakTime = Math.floor((endTime.getTime() - breakStartTime.getTime()) / 1000)
+    }
+    
+    return Math.max(0, totalElapsed - breakTimeSeconds - currentBreakTime)
+  }
+  
+  const sessionDuration = getActualSessionDuration()
 
   // Add debug logging at component mount
   console.log('🚀 SessionCompletion: Component mounted with state:', {
@@ -101,7 +125,14 @@ const SessionCompletion: React.FC = () => {
     }
     
     summaries.forEach(summary => {
-      // Priority 1: Direct task completion data from AI summaries
+      // Priority 1: Key tasks (accomplishments) from AI analysis
+      if (summary.key_tasks && Array.isArray(summary.key_tasks)) {
+        summary.key_tasks.forEach((task: string) => {
+          taskCandidates.push({text: task, confidence: 0.98, source: 'ai_key_tasks'})
+        })
+      }
+      
+      // Priority 2: Direct task completion data from AI summaries
       if (summary.task_completion?.completed) {
         summary.task_completion.completed.forEach((task: string) => {
           taskCandidates.push({text: task, confidence: 0.95, source: 'ai_direct'})
@@ -210,35 +241,58 @@ const SessionCompletion: React.FC = () => {
   // Wait for AI data to be ready with enhanced checking
   useEffect(() => {
     if (showSummaryModal && currentSessionId) {
-      // Check if we have comprehensive AI data OR final summary
-      const hasRealData = aiSummaries.length > 0 || finalSummary
+      // Check session duration to determine which data to use
+      const sessionDurationMins = Math.round(sessionDuration / 60)
+      const shouldUseAISummary = sessionDurationMins < 30
+      
+      console.log('🔍 Session completion: Duration check', {
+        sessionDurationMins,
+        shouldUseAISummary,
+        aiSummariesCount: aiSummaries.length,
+        hasFinalSummary: !!finalSummary
+      })
+      
+      // For sessions < 30 min: Use AI summaries; for >= 30 min: Use final summary
+      const hasRealData = shouldUseAISummary ? aiSummaries.length > 0 : (finalSummary || aiSummaries.length > 0)
       
       if (hasRealData && !loading) {
         console.log('✅ Session completion: Data is ready, processing insights...', {
+          sessionDurationMins,
+          shouldUseAISummary,
           aiSummariesCount: aiSummaries.length,
           hasFinalSummary: !!finalSummary,
           finalSummaryData: finalSummary
         })
         
-        // Extract productivity score from available sources
+        // Extract productivity score based on session duration
         const getProductivityScore = () => {
-          // Priority 1: AI summaries average
+          const sessionDurationMins = Math.round(sessionDuration / 60)
+          
+          if (sessionDurationMins < 30) {
+            // For sessions < 30 min: Use AI summaries
           if (aiSummaries.length > 0) {
             const score = calculateOverallAIProductivity(aiSummaries as AISummary[])
-            console.log('🔍 SessionCompletion: Using AI summaries productivity:', score)
+              console.log('🔍 SessionCompletion: Using AI summaries productivity (< 30 min):', score)
             return score
           }
-          
-          // Priority 2: Final summary AI productivity score
+          } else {
+            // For sessions >= 30 min: Use final summary first, then AI summaries as fallback
           if (finalSummary?.ai_productivity_score) {
-            console.log('🔍 SessionCompletion: Using final summary ai_productivity_score:', finalSummary.ai_productivity_score)
+              console.log('🔍 SessionCompletion: Using final summary ai_productivity_score (>= 30 min):', finalSummary.ai_productivity_score)
             return finalSummary.ai_productivity_score
           }
           
-          // Priority 3: Final summary productivity score
           if (finalSummary?.productivity_score) {
-            console.log('🔍 SessionCompletion: Using final summary productivity_score:', finalSummary.productivity_score)
+              console.log('🔍 SessionCompletion: Using final summary productivity_score (>= 30 min):', finalSummary.productivity_score)
             return finalSummary.productivity_score
+            }
+            
+            // Fallback to AI summaries if no final summary
+            if (aiSummaries.length > 0) {
+              const score = calculateOverallAIProductivity(aiSummaries as AISummary[])
+              console.log('🔍 SessionCompletion: Using AI summaries as fallback (>= 30 min):', score)
+              return score
+            }
           }
           
           // Priority 4: Extract from summary text (e.g., "65% productivity")
@@ -257,62 +311,87 @@ const SessionCompletion: React.FC = () => {
           return 0
         }
         
-        // Extract completed tasks from available sources
+        // Extract completed tasks based on session duration
         const getCompletedTasksData = () => {
           const tasks = []
           let count = 0
+          const sessionDurationMins = Math.round(sessionDuration / 60)
           
-          // From AI summaries
+          if (sessionDurationMins < 30) {
+            // For sessions < 30 min: Use AI summaries only
           if (aiSummaries.length > 0) {
             const aiTasks = getCompletedTasks(aiSummaries)
             tasks.push(...aiTasks)
             count = calculateCompletedTasks(aiSummaries as AISummary[])
+              console.log('🔍 SessionCompletion: Using AI tasks (< 30 min):', tasks.length)
           }
-          
-          // From final summary
+          } else {
+            // For sessions >= 30 min: Use final summary first, then AI summaries as fallback
           if (finalSummary?.completed_tasks?.length > 0) {
             tasks.push(...finalSummary.completed_tasks)
             count = Math.max(count, finalSummary.completed_tasks.length)
-          }
-          
-          // From key accomplishments (as fallback)
-          if (finalSummary?.key_accomplishments?.length > 0 && tasks.length === 0) {
+              console.log('🔍 SessionCompletion: Using final summary tasks (>= 30 min):', tasks.length)
+            } else if (aiSummaries.length > 0) {
+              const aiTasks = getCompletedTasks(aiSummaries)
+              tasks.push(...aiTasks)
+              count = calculateCompletedTasks(aiSummaries as AISummary[])
+              console.log('🔍 SessionCompletion: Using AI tasks as fallback (>= 30 min):', tasks.length)
+            } else if (finalSummary?.key_accomplishments?.length > 0) {
+              // Last resort: key accomplishments
             tasks.push(...finalSummary.key_accomplishments)
             count = Math.max(count, finalSummary.key_accomplishments.length)
+              console.log('🔍 SessionCompletion: Using key accomplishments as fallback (>= 30 min):', tasks.length)
+            }
           }
           
-          return { tasks: [...new Set(tasks)], count }
+          // Better deduplication for completed tasks
+          const uniqueTasks = []
+          const seenTasks = new Set()
+          
+          tasks.forEach(task => {
+            const normalized = task.toLowerCase().trim()
+            if (!seenTasks.has(normalized)) {
+              seenTasks.add(normalized)
+              uniqueTasks.push(task)
+            }
+          })
+          
+          return { tasks: uniqueTasks, count: uniqueTasks.length }
         }
         
-        // Get recommendations from available sources
+        // Get recommendations from available sources (AI only)
         const getRecommendationsData = () => {
           const recommendations = []
           
-          // From final summary
+          // Only use AI-generated recommendations from final summary
           if (finalSummary?.recommendations?.length > 0) {
-            recommendations.push(...finalSummary.recommendations)
+            // Filter to only include AI-generated recommendations (those with emojis or specific patterns)
+            const aiRecommendations = finalSummary.recommendations.filter(rec => 
+              rec.includes('💡') || rec.includes('📚') || rec.includes('📈') || rec.includes('⏰') ||
+              rec.includes('🎯') || rec.includes('🚀') || rec.includes('🔧') || rec.includes('💪')
+            )
+            recommendations.push(...aiRecommendations)
           }
           
-          // From AI summaries
+          // From AI summaries (these are always AI-generated)
           if (aiSummaries.length > 0) {
             const aiRecommendations = generateRecommendations(finalSummary, aiSummaries)
             recommendations.push(...aiRecommendations)
           }
           
-          // Generate basic recommendations if none available
-          if (recommendations.length === 0 && finalSummary) {
-            const score = getProductivityScore()
-            if (finalSummary.improvement === 'declined') {
-              recommendations.push('💡 Consider breaking tasks into smaller, manageable chunks')
-            }
-            if (score >= 80) {
-              recommendations.push('🚀 Excellent focus! Try maintaining this productivity level')
-            } else if (score < 50) {
-              recommendations.push('📚 Try the Pomodoro technique for better focus sessions')
-            }
-          }
+          // Remove duplicates with better deduplication
+          const uniqueRecommendations = []
+          const seenRecommendations = new Set()
           
-          return [...new Set(recommendations)].slice(0, 4)
+          recommendations.forEach(rec => {
+            const normalized = rec.toLowerCase().trim()
+            if (!seenRecommendations.has(normalized)) {
+              seenRecommendations.add(normalized)
+              uniqueRecommendations.push(rec)
+            }
+          })
+          
+          return uniqueRecommendations.slice(0, 4)
         }
         
         const completedTasksData = getCompletedTasksData()
@@ -455,12 +534,19 @@ const SessionCompletion: React.FC = () => {
       setTimeout(() => setShowStars(true), 500)
       setTimeout(() => setShowContent(true), 1000)
       
-      // Show fireworks if they did well (3 stars or high productivity)
+      // Show fireworks based on performance level
       const score = sessionData.overallProductivity || finalSummary?.ai_productivity_score || finalSummary?.productivity_score || 0
       const stars = finalSummary?.stars || 0
       
       if (stars >= 3 || score >= 80) {
+        // Outstanding performance - high intensity fireworks
         setTimeout(() => setShowFireworks(true), 1500)
+      } else if (stars >= 2 || score >= 60) {
+        // Good performance - medium intensity fireworks
+        setTimeout(() => setShowFireworks(true), 2000)
+      } else if (score >= 40) {
+        // Decent performance - light fireworks
+        setTimeout(() => setShowFireworks(true), 2500)
       }
     }
   }, [showSummaryModal, isDataReady, sessionData, finalSummary])
@@ -745,33 +831,25 @@ const SessionCompletion: React.FC = () => {
         overflow: 'auto',
         position: 'relative'
       }}>
-        {/* Fireworks effect */}
-        {showFireworks && (
-          <div style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            pointerEvents: 'none',
-            zIndex: 1
-          }}>
-            {[...Array(6)].map((_, i) => (
-              <div
-                key={i}
-                style={{
-                  position: 'absolute',
-                  fontSize: '24px',
-                  animation: `firework 2s ease-out ${i * 0.2}s`,
-                  left: `${20 + (i * 15)}%`,
-                  top: `${20 + (i % 3) * 20}%`
-                }}
-              >
-                🎆
-              </div>
-            ))}
-          </div>
-        )}
+        {/* Real Fireworks effect */}
+        <Fireworks 
+          isActive={showFireworks}
+          duration={2000}
+          intensity={(() => {
+            const score = sessionData?.overallProductivity || finalSummary?.ai_productivity_score || finalSummary?.productivity_score || 0
+            const stars = finalSummary?.stars || 0
+            if (stars >= 3 || score >= 80) return 'medium'
+            if (stars >= 2 || score >= 60) return 'low'
+            return 'low'
+          })()}
+          colors={['#FFD700', '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7']}
+        />
+        
+        {/* Sparkle Particles for extra visual appeal */}
+        <SparkleParticles 
+          isActive={showStars}
+          count={30}
+        />
 
         {/* Header */}
         <div style={{
@@ -969,6 +1047,26 @@ const SessionCompletion: React.FC = () => {
             </div>
           </div>
 
+          {/* Session Overview */}
+          {finalSummary?.session_overview && (
+            <div className="card" style={{ marginBottom: 'var(--spacing-xl)' }}>
+              <div className="card-header">
+                <h3 className="card-title">📋 Session Overview</h3>
+              </div>
+              <div className="card-content">
+                <p style={{
+                  fontSize: 'var(--font-lg)',
+                  color: 'var(--text-primary)',
+                  lineHeight: '1.6',
+                  margin: 0,
+                  fontWeight: '600'
+                }}>
+                  {finalSummary.session_overview}
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* AI Summary */}
           {(finalSummary?.final_summary || finalSummary?.summary) && (
             <div className="card" style={{ marginBottom: 'var(--spacing-xl)' }}>
@@ -984,6 +1082,215 @@ const SessionCompletion: React.FC = () => {
                 }}>
                   {finalSummary.final_summary || finalSummary.summary}
                 </p>
+              </div>
+            </div>
+          )}
+
+          {/* AI Comprehensive Analysis (for longer sessions) */}
+          {finalSummary?.ai_comprehensive_summary && (
+            <div className="card" style={{ marginBottom: 'var(--spacing-xl)' }}>
+              <div className="card-header">
+                <h3 className="card-title">🧠 Comprehensive AI Analysis</h3>
+                <p style={{ 
+                  fontSize: 'var(--font-sm)', 
+                  color: 'var(--text-secondary)', 
+                  margin: '4px 0 0 0' 
+                }}>
+                  Deep insights for sessions longer than 30 minutes
+                </p>
+              </div>
+              <div className="card-content">
+                <p style={{
+                  fontSize: 'var(--font-base)',
+                  color: 'var(--text-primary)',
+                  lineHeight: '1.6',
+                  margin: 0,
+                  fontStyle: 'italic'
+                }}>
+                  {finalSummary.ai_comprehensive_summary}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* AI Productivity Insights */}
+          {finalSummary?.ai_productivity_insights && finalSummary.ai_productivity_insights.length > 0 && (
+            <div className="card" style={{ marginBottom: 'var(--spacing-xl)' }}>
+              <div className="card-header">
+                <h3 className="card-title">💡 Strategic Productivity Insights</h3>
+              </div>
+              <div className="card-content">
+                <ul style={{
+                  listStyle: 'none',
+                  padding: 0,
+                  margin: 0
+                }}>
+                  {finalSummary.ai_productivity_insights.map((insight: string, index: number) => (
+                    <li key={index} style={{
+                      fontSize: 'var(--font-base)',
+                      color: 'var(--text-primary)',
+                      lineHeight: '1.6',
+                      marginBottom: index < finalSummary.ai_productivity_insights.length - 1 ? 'var(--spacing-md)' : 0,
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: 'var(--spacing-sm)'
+                    }}>
+                      <span style={{ color: 'var(--accent-purple)', fontWeight: 'bold' }}>•</span>
+                      <span>{insight}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          )}
+
+          {/* Enhanced AI Recommendations */}
+          {finalSummary?.ai_recommendations && finalSummary.ai_recommendations.length > 0 && (
+            <div className="card" style={{ marginBottom: 'var(--spacing-xl)' }}>
+              <div className="card-header">
+                <h3 className="card-title">🎯 AI Strategic Recommendations</h3>
+              </div>
+              <div className="card-content">
+                <ul style={{
+                  listStyle: 'none',
+                  padding: 0,
+                  margin: 0
+                }}>
+                  {finalSummary.ai_recommendations.map((recommendation: string, index: number) => (
+                    <li key={index} style={{
+                      fontSize: 'var(--font-base)',
+                      color: 'var(--text-primary)',
+                      lineHeight: '1.6',
+                      marginBottom: index < finalSummary.ai_recommendations.length - 1 ? 'var(--spacing-md)' : 0,
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: 'var(--spacing-sm)'
+                    }}>
+                      <span style={{ color: 'var(--accent-green)', fontWeight: 'bold' }}>→</span>
+                      <span>{recommendation}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          )}
+
+          {/* Todo Tracking Summary */}
+          {(finalSummary?.planned_todos?.length > 0 || finalSummary?.completed_todos?.length > 0 || finalSummary?.uncompleted_todos?.length > 0) && (
+            <div className="card" style={{ marginBottom: 'var(--spacing-xl)' }}>
+              <div className="card-header">
+                <h3 className="card-title">📝 Todo Progress Summary</h3>
+              </div>
+              <div className="card-content">
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+                  gap: 'var(--spacing-lg)',
+                  marginBottom: 'var(--spacing-lg)'
+                }}>
+                  <div style={{
+                    textAlign: 'center',
+                    padding: 'var(--spacing-md)',
+                    background: 'rgba(255, 193, 7, 0.1)',
+                    borderRadius: '8px',
+                    border: '1px solid rgba(255, 193, 7, 0.2)'
+                  }}>
+                    <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#ffc107' }}>
+                      {finalSummary.planned_todos?.length || 0}
+                    </div>
+                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                      Planned
+                    </div>
+                  </div>
+                  <div style={{
+                    textAlign: 'center',
+                    padding: 'var(--spacing-md)',
+                    background: 'rgba(76, 175, 80, 0.1)',
+                    borderRadius: '8px',
+                    border: '1px solid rgba(76, 175, 80, 0.2)'
+                  }}>
+                    <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#4caf50' }}>
+                      {finalSummary.completed_todos?.length || 0}
+                    </div>
+                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                      Completed
+                    </div>
+                  </div>
+                  <div style={{
+                    textAlign: 'center',
+                    padding: 'var(--spacing-md)',
+                    background: 'rgba(244, 67, 54, 0.1)',
+                    borderRadius: '8px',
+                    border: '1px solid rgba(244, 67, 54, 0.2)'
+                  }}>
+                    <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#f44336' }}>
+                      {finalSummary.uncompleted_todos?.length || 0}
+                    </div>
+                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                      Remaining
+                    </div>
+                  </div>
+                </div>
+
+                {/* Completed Todos List */}
+                {finalSummary.completed_todos && finalSummary.completed_todos.length > 0 && (
+                  <div style={{ marginBottom: 'var(--spacing-lg)' }}>
+                    <h4 style={{ 
+                      fontSize: 'var(--font-sm)', 
+                      color: 'var(--text-secondary)', 
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.5px',
+                      marginBottom: 'var(--spacing-sm)'
+                    }}>
+                      ✅ Completed
+                    </h4>
+                    <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                      {finalSummary.completed_todos.map((todo: string, index: number) => (
+                        <li key={index} style={{
+                          fontSize: 'var(--font-sm)',
+                          color: 'var(--text-primary)',
+                          marginBottom: 'var(--spacing-xs)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 'var(--spacing-sm)'
+                        }}>
+                          <span style={{ color: '#4caf50' }}>✓</span>
+                          <span style={{ textDecoration: 'line-through', opacity: 0.7 }}>{todo}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Uncompleted Todos List */}
+                {finalSummary.uncompleted_todos && finalSummary.uncompleted_todos.length > 0 && (
+                  <div>
+                    <h4 style={{ 
+                      fontSize: 'var(--font-sm)', 
+                      color: 'var(--text-secondary)', 
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.5px',
+                      marginBottom: 'var(--spacing-sm)'
+                    }}>
+                      🔄 For Next Session
+                    </h4>
+                    <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                      {finalSummary.uncompleted_todos.map((todo: string, index: number) => (
+                        <li key={index} style={{
+                          fontSize: 'var(--font-sm)',
+                          color: 'var(--text-primary)',
+                          marginBottom: 'var(--spacing-xs)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 'var(--spacing-sm)'
+                        }}>
+                          <span style={{ color: '#ffc107' }}>○</span>
+                          <span>{todo}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -1177,20 +1484,7 @@ const SessionCompletion: React.FC = () => {
           50% { opacity: 1; transform: scale(1.05); }
         }
         
-        @keyframes firework {
-          0% { 
-            opacity: 1; 
-            transform: scale(1) translateY(0); 
-          }
-          50% { 
-            opacity: 1; 
-            transform: scale(1.2) translateY(-20px); 
-          }
-          100% { 
-            opacity: 0; 
-            transform: scale(1.5) translateY(-40px); 
-          }
-        }
+
       `}</style>
     </div>
   )

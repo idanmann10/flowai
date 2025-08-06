@@ -26,6 +26,7 @@ interface AIProductivitySummary {
   energyLevel: number;
   breakRecommendation: string;
   energyTrend: string;
+  suggestions: string[];
 }
 
 export class AISummaryService {
@@ -151,11 +152,114 @@ Include both active interaction time AND inactive/reading time.
 
 **ANALYSIS INSTRUCTIONS:**
 
-1. **PRODUCTIVITY ASSESSMENT:** Analyze the activity patterns, app switching frequency, text input quality, and task focus. Consider:
-   - Are they staying focused on productive apps/websites?
-   - How much context switching between apps and websites?
-   - Quality and length of text inputs (coding, writing, communication)
-   - Time spent on each application and specific website relative to productivity goals
+1. **KEY ACCOMPLISHMENTS EXTRACTION (SMART PATTERN ANALYSIS):**
+   **ANALYZE LIKE A HUMAN**: Look at the data patterns and infer what was actually accomplished:
+   
+   **PATTERN ANALYSIS APPROACH:**
+   - Study the sequence of apps and activities chronologically
+   - Look for evidence of completion: file operations, saves, exports, uploads, publishing actions
+   - Identify tool chains that work together toward a common goal
+   - Recognize when time spent + tools used = meaningful work accomplished
+   
+   **ACCOMPLISHMENT INFERENCE RULES:**
+   - If you see creative/editing apps + file management = assume creation/editing work was completed
+   - If you see communication tools + document work = assume business/coordination tasks were completed  
+   - If you see research tools + note-taking = assume learning/analysis work was completed
+   - If you see development tools + testing = assume coding/building work was completed
+   - If you see any focused tool usage for meaningful time = assume productive work was done
+   
+   **BE CREATIVE AND LOGICAL:**
+   - Don't limit yourself to predefined patterns
+   - Use common sense about what tools accomplish together
+   - Look for evidence in the activity data itself
+   - If someone spends focused time in productive tools, assume they accomplished something meaningful
+   - Infer the most logical accomplishment based on the tools and time invested
+   
+   **EXAMPLES OF INFERENCE (but don't limit yourself to these):**
+   - Long focused time in any creative tool = "Created/edited content"
+   - Sequence of related productivity tools = "Completed workflow tasks"
+   - Research + documentation pattern = "Researched and documented findings"
+   - ANY sustained productive activity = "Made progress on [type] work"
+   
+   Only avoid claiming accomplishments if there's clear evidence of very brief usage or abandonment.
+
+2. **PRODUCTIVITY ASSESSMENT WITH CONTEXT ANALYSIS:**
+   Calculate Focus% = productive-app seconds ÷ total seconds
+   Calculate SwitchRate = app/URL switches per minute
+   Calculate DeepWorkMin = longest uninterrupted productive sequence in minutes
+   
+   **CONTEXT-BASED SCORING:** Before assigning productivity scores, analyze if apps truly work together:
+   - Look at window titles, URLs, and content to determine if apps serve the same goal
+   - Example: ChatGPT + Google Docs + Email could be content creation workflow (HIGH productivity)
+   - Example: Work app + Social media + Work app could be distraction pattern (LOWER productivity)
+   - Use text content and context clues to determine genuine workflow vs random switching
+   
+   **REALISTIC SCORING RUBRIC:**
+   • 85-100 = Exceptional focus: Focus ≥80%, SwitchRate ≤1, DeepWorkMin ≥15, OR clear task completion with evidence
+   • 70-84  = Good focus: Focus 60-79%, SwitchRate 1-3, DeepWorkMin ≥8, OR consistent productive workflow
+   • 50-69  = Mixed focus: Focus 40-59%, SwitchRate 3-5, some productive work, but frequent switching
+   • 30-49  = Scattered: Focus 20-39%, SwitchRate 5-8, minimal productive work, lots of switching
+   • 0-29   = Very scattered: Focus <20% OR SwitchRate ≥8, mostly unproductive activity
+   
+   **REALISTIC TASK ANALYSIS:**
+   - Group app switches that serve the SAME task within 10 minutes (shorter window)
+   - Examples of productive clusters:
+     • Content Creation: ChatGPT (draft) → Docs (edit) → Simplified (schedule)
+     • Development: VS Code (code) → Browser (test) → Terminal (deploy)
+     • Research: Browser (search) → Notion (notes) → ChatGPT (explain)
+     • Communication: Slack (discuss) → Docs (document) → Email (follow-up)
+   
+   - Count as "distraction" if switching to UNRELATED tasks or entertainment
+   - Use context clues (window titles, URLs, content) to determine task relationships
+   - Be realistic about what constitutes productive work vs. just activity
+
+**REALISTIC PRODUCTIVITY ASSESSMENT:**
+Before calculating productivity scores, analyze the actual work patterns:
+
+1. **Evidence-Based Analysis**: Look for concrete evidence of work completion
+   - File saves, exports, uploads, publishing actions
+   - Communication sent, emails written, messages sent
+   - Code commits, deployments, testing
+   - Research documented, notes taken, findings recorded
+   
+2. **Time Quality Assessment**: 
+   - How much time was spent in productive apps vs. distractions?
+   - Was the time spent actually working or just browsing?
+   - Did the user accomplish specific tasks or just move between apps?
+   
+3. **Realistic Scoring**: 
+   - 85-100% = Clear evidence of focused work completion
+   - 70-84% = Good productive time with some task completion
+   - 50-69% = Mixed productivity, some work done but lots of switching
+   - 30-49% = Mostly unproductive, minimal task completion
+   - 0-29% = Very scattered, no clear work accomplished
+
+**ENHANCED TASK DETECTION & BULK WORK PATTERNS:**
+When identifying completed todos and tasks, look for these patterns:
+
+1. **BULK WORK DETECTION**: Look for repeated patterns that indicate bulk work:
+   - Multiple similar actions (drafting emails, sending messages, reviewing ads)
+   - Time spent in communication apps (Gmail, LinkedIn, Slack, etc.)
+   - Text content patterns showing outreach, messaging, or communication
+   - App usage patterns that suggest systematic work (not just browsing)
+
+2. **OUTREACH WORK DETECTION**: 
+   - If user spends time in Gmail, LinkedIn, or communication apps = likely outreach work
+   - Multiple email drafts or messages sent = bulk outreach completed
+   - Time spent in Meta Ads, Google Ads, or advertising platforms = ad review work
+   - Look for patterns like: "Drafted 15+ outreach emails", "Reviewed Meta Ads campaign", "Sent 20+ LinkedIn messages"
+
+3. **CONSERVATIVE BUT REALISTIC ESTIMATES**:
+   - If user spent 30 minutes in Gmail drafting emails = likely completed 10-15 outreach emails
+   - If user spent 20 minutes in Meta Ads = likely reviewed and optimized ads
+   - If user spent time in LinkedIn = likely sent connection requests or messages
+   - Include time estimates like: "Drafted 15+ outreach emails (30 min)", "Reviewed Meta Ads (20 min)"
+
+4. **EVIDENCE-BASED BUT PATTERN-AWARE**:
+   - Don't require specific text evidence for every task
+   - Use app usage patterns and time spent to infer completed work
+   - If user spent significant time in productive apps, they likely accomplished related tasks
+   - Be realistic about what can be accomplished in the time spent
 
 2. **WEBSITE-SPECIFIC ANALYSIS:** CRITICAL - Do NOT say "Chrome" or "Safari". Identify the actual websites:
    - Analyze window titles, URLs, and content to identify SPECIFIC websites and services
@@ -168,7 +272,19 @@ Include both active interaction time AND inactive/reading time.
    - Context of what they were doing on each site
    - Productivity vs distraction assessment for each website
 
-3. **TODO ANALYSIS:** Based on the activity data, determine:
+3. **CONTEXT-AWARE TASK CLUSTERING:** Analyze the PURPOSE of each app switch:
+   - Look for evidence of related tasks across different apps
+   - Group activities that serve the SAME goal within 15 minutes
+   - Distinguish between:
+     • Productive workflow switches (ChatGPT → Docs → Simplified for content)
+     • Distraction switches (Work → Instagram → Work)
+     • Break switches (Work → Lunch → Work)
+   
+   - Use window titles, URLs, and content to determine task relationships
+   - Reward productive multi-tool workflows
+   - Only penalize switching to UNRELATED tasks
+
+4. **TODO ANALYSIS:** Based on the activity data, determine:
    - Which todos might have been completed (look for evidence in app usage, text inputs, file operations)
    - Which todos show signs of being worked on
    - Patterns that suggest specific tasks are in progress
@@ -179,13 +295,34 @@ Include both active interaction time AND inactive/reading time.
    - Communication apps: Work-related vs social
    - Creative tools: What type of creation
 
-5. **DISTRACTION DETECTION:** Identify:
-   - Excessive social media or entertainment
-   - Frequent app switching without purpose
-   - Long periods in non-productive applications
-   - Context switches that break focus
+5. **BREAK & IDLE TIME ANALYSIS:** Distinguish between intentional breaks and distractions:
+   - **Intentional Breaks**: Long periods (>5 min) with no activity = likely healthy breaks
+   - **Natural Pauses**: 1-5 minute gaps between tasks = normal workflow pauses  
+   - **Task Switching**: Brief gaps (<1 min) = normal app/task transitions
+   - **DO NOT PENALIZE BREAKS**: If you detect break patterns, mention them positively
+   - **Break Indicators**: Look for patterns like:
+     • Complete stop in activity for extended periods
+     • Return to productive work after idle time
+     • Consistent break timing (lunch, etc.)
+   - **Productivity During Breaks**: Score the ACTIVE work periods, not the break time
+   - **Break Benefits**: Acknowledge that breaks can improve subsequent productivity
 
-6. **ENERGY & FOCUS ASSESSMENT:** Calculate an energy/focus level (0-100) based on:
+6. **DISTRACTION DETECTION & ANALYSIS:** Identify actual distractions (not breaks):
+   - **Real Distractions**: Entertainment, non-work social media during work time
+   - **Frequent Purposeless Switching**: Rapid app changes without workflow logic
+   - **Off-Task Activities**: Personal activities during focused work time
+   - **Context Breaks**: Switching to unrelated tasks that break focus
+   - **BUT NOT**: Intentional breaks, lunch, natural workflow pauses
+   
+   **DISTRACTION ANALYSIS REQUIRED:** If productivity is less than 100%, analyze and identify specific distractions:
+   - Look for entertainment websites, social media, gaming, or non-work activities
+   - Identify excessive app switching without clear purpose
+   - Note time spent on unproductive activities
+   - Analyze patterns that broke focus or workflow
+   - Provide specific examples of what caused productivity loss
+   - Suggest strategies to avoid these distractions in future sessions
+
+7. **ENERGY & FOCUS ASSESSMENT:** Calculate an energy/focus level (0-100) based on:
    - Productivity trend over this interval (declining trend = lower energy)
    - Task completion rate vs time spent (accomplishing goals = higher energy)
    - Sustained focus periods vs frequent app switching (deep work = higher energy)
@@ -193,21 +330,35 @@ Include both active interaction time AND inactive/reading time.
    - Session intensity (balanced activity vs burnout patterns)
    - Break patterns if detected (good breaks boost energy, distractions lower it)
 
+8. **PRODUCTIVITY SUGGESTIONS:** Provide 2-3 specific, actionable suggestions based on THIS INTERVAL's analysis:
+   - **BE SPECIFIC TO THIS SESSION**: Don't give generic advice, analyze what actually happened
+   - **For Content Creation Workflows**: "Great workflow! Consider batching similar content creation tasks together"
+   - **For Development Work**: "Strong focus on coding. Consider using split-screen to reduce context switching between editor and browser"
+   - **For Video Editing**: "Excellent creative work! Consider setting up templates to speed up future editing workflows"
+   - **For Research Work**: "Good information gathering. Try using a note-taking app to capture insights as you research"
+   - **For High App Switching**: Only suggest reducing if it's truly unproductive, not if it's workflow-related
+   - **For Low Activity**: "Consider taking a break or switching to a different type of task to re-energize"
+   - **For Mixed Work**: "Try time-blocking similar tasks together to maintain deeper focus"
+   
+   **MAKE IT PERSONAL**: Look at what tools they used, what they accomplished, and their work patterns to give tailored advice for improvement.
+
 **REQUIRED OUTPUT FORMAT:**
 Return ONLY a valid JSON object with this exact structure:
 
 {
+  "sessionOverview": "High-level summary of the main work focus and activities (e.g., 'AI-assisted content creation session', 'Research and development work', 'Team communication and planning')",
   "summaryText": "Detailed 2-3 sentence summary of what the user accomplished in this time period, including specific apps used and estimated time spent on each major activity.",
   "productivityPct": [0-100 integer representing estimated productivity percentage],
-  "completedTodos": ["Array of todo texts that appear to have been completed based on activity evidence"],
+  "completedTodos": ["Array of up to 5 todo texts that appear to have been completed based on activity evidence"],
   "pendingTodos": ["Array of todo texts that are still in progress or not started"],
-  "keyTasks": ["Array of 3-5 specific tasks/activities performed, with time estimates where possible"],
+  "keyTasks": ["Array of 3-5 specific tasks/activities performed, with time estimates where possible - THESE ARE YOUR ACCOMPLISHMENTS"],
   "appUsage": [
     { "app": "OpenAI", "minutes": [estimated minutes - NEVER use 'Chrome', always identify the actual website] },
     { "app": "VS Code", "minutes": [estimated minutes spent] },
     { "app": "ChatGPT", "minutes": [estimated minutes - extract from window titles and content] }
   ],
-  "distractionPoints": "Specific description of any distractions or productivity issues identified, or 'No significant distractions detected' if none found",
+  "distractionPoints": "REQUIRED: If productivity < 100%, provide specific analysis of distractions and time-wasters. Include exact apps/websites that caused distraction, time spent on unproductive activities, and focus-breaking patterns. If productivity is 100%, say 'No significant distractions detected'",
+  "distractionsToAvoid": ["Array of 2-3 specific distractions to avoid in future sessions, e.g., 'Limit social media browsing during work time', 'Reduce app switching between unrelated tasks'"],
   "appContext": [
     { "app": "OpenAI", "context": "Researching API pricing and fine-tuning options - identify specific website from window titles" },
     { "app": "VS Code", "context": "Active coding session working on React components" },
@@ -215,7 +366,8 @@ Return ONLY a valid JSON object with this exact structure:
   ],
   "energyLevel": [0-100 integer representing current energy/focus level based on productivity patterns, task completion, and focus quality],
   "breakRecommendation": "Specific suggestion like 'Keep going!', 'Take a 5-min break soon', 'Time for a 15-min recharge', or 'You're in the zone!' based on energy level and productivity trends",
-  "energyTrend": "increasing/stable/declining - direction of energy/focus over this interval"
+  "energyTrend": "increasing/stable/declining - direction of energy/focus over this interval",
+  "suggestions": ["Array of 2-3 specific, actionable suggestions to improve productivity, focus, or workflow based on the analysis"]
 }
 
 **IMPORTANT GUIDELINES:**
@@ -226,6 +378,14 @@ Return ONLY a valid JSON object with this exact structure:
 - Be honest about productivity - don't inflate scores without evidence
 - Focus on actionable insights and specific observations
 - If no meaningful activity is detected, reflect that in lower productivity scores
+- **CRITICAL: Recognize that modern work often involves productive multi-tool workflows**
+- **REWARD productive app switching that serves the same goal (ChatGPT → Docs → Email for content creation)**
+- **Only penalize switching to UNRELATED tasks or distractions**
+- **For AI-assisted work, recognize that ChatGPT/OpenAI usage can be highly productive when used purposefully**
+- **Consider task completion and goal achievement, not just time spent in single apps**
+- **BREAK AWARENESS: Do NOT penalize intentional breaks, idle time, or natural pauses - they are healthy and necessary**
+- **SCORE ACTIVE PERIODS: Calculate productivity based on active work time, not total time including breaks**
+- **BREAK BENEFITS: Acknowledge when breaks appear to refresh and improve subsequent work quality**
 
 Analyze the data thoroughly and provide your assessment:`;
   }
@@ -286,23 +446,26 @@ Analyze the data thoroughly and provide your assessment:`;
       }
     });
     
-    // Estimate time spent for regular apps
+    // Estimate time spent for regular apps (in minutes)
     Object.keys(appUsage).forEach(app => {
-      appUsage[app].timeSpent = Math.round(appUsage[app].events * 0.15); // Slightly higher estimate for desktop apps
+      appUsage[app].timeSpent = Math.round(appUsage[app].events * 0.15); // Estimate in minutes
     });
     
-    // Estimate time spent for websites (more granular)
+    // Estimate time spent for websites (more granular, in minutes)
     Object.keys(websiteUsage).forEach(website => {
       // Website events are typically more frequent, so use a different multiplier
-      const baseTime = Math.round(websiteUsage[website].events * 0.08); // Base time estimation
+      const baseTimeMinutes = Math.round(websiteUsage[website].events * 0.08); // Base time in minutes
       const uniqueUrls = websiteUsage[website].urls.size;
       
       // Add bonus time for websites with multiple unique URLs (indicates more activity)
-      const urlBonus = Math.min(uniqueUrls * 0.3, 2); // Max 2 minutes bonus
-      websiteUsage[website].timeSpent = Math.max(baseTime + urlBonus, 0.1); // Minimum 6 seconds
+      const urlBonusMinutes = Math.min(uniqueUrls * 0.3, 2); // Max 2 minutes bonus
+      const totalMinutes = Math.max(baseTimeMinutes + urlBonusMinutes, 0.1); // Minimum 6 seconds
+      
+      // Store in minutes for consistency with the rest of the system
+      websiteUsage[website].timeSpent = totalMinutes;
       
       // Convert to minutes and seconds for display
-      const totalSeconds = Math.round(websiteUsage[website].timeSpent * 60);
+      const totalSeconds = Math.round(totalMinutes * 60);
       const minutes = Math.floor(totalSeconds / 60);
       const seconds = totalSeconds % 60;
       websiteUsage[website].displayTime = minutes > 0 ? 
@@ -437,7 +600,7 @@ Analyze the data thoroughly and provide your assessment:`;
           }
         ],
         temperature: 0.2, // Low temperature for consistent analysis
-        max_tokens: 1200
+        max_tokens: 4000  // Increased for testing - was 1200
       });
 
       const responseText = completion.choices[0]?.message?.content;

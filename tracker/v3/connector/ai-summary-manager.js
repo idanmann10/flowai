@@ -12,7 +12,7 @@ class AISummaryManager extends EventEmitter {
         this.intervalTimer = null;
         this.chunkNumber = 0;
         this.lastProcessedTime = null;
-        this.intervalDuration = 10 * 60 * 1000; // 10 minutes for optimal work day analysis
+        this.intervalDuration = 15 * 60 * 1000; // 15 minutes
         this.accumulatedEvents = [];
         this.appUsageTracker = {};
         this.lastAppChangeTime = null;
@@ -57,7 +57,10 @@ class AISummaryManager extends EventEmitter {
     processEvent(event) {
         if (!this.sessionData?.isActive) return;
 
-        console.log('🟢 [AI MANAGER] Event buffered:', event);
+        // Only log every 10th event to reduce noise
+        if (this.accumulatedEvents.length % 10 === 0) {
+            console.log('🟢 [AI MANAGER] Event buffered:', event);
+        }
 
         this.accumulatedEvents.push({
             ...event,
@@ -115,13 +118,16 @@ class AISummaryManager extends EventEmitter {
      * Generate summary for the current interval
      */
     async generateIntervalSummary() {
-        if (!this.sessionData?.isActive || !this.lastProcessedTime) return;
+        console.log('⏰ [AI SUMMARY DEBUG] 15-minute interval summary triggered');
+        
+        if (!this.sessionData?.isActive || !this.lastProcessedTime) {
+            console.log('⚠️ [AI SUMMARY DEBUG] Skipping summary generation - session not active');
+            return;
+        }
 
         try {
             const now = new Date();
             this.chunkNumber++;
-
-            console.log(`🤖 Generating AI summary for chunk ${this.chunkNumber}...`);
 
             // Prepare tracking data for this interval
             const trackingData = {
@@ -144,8 +150,6 @@ class AISummaryManager extends EventEmitter {
                 chunkNumber: this.chunkNumber,
                 sessionId: this.sessionData.sessionId
             });
-
-            console.log(`✅ Interval summary request sent for chunk ${this.chunkNumber}`);
 
             this.resetIntervalData(now);
 

@@ -72,6 +72,13 @@ class TrackerStore extends EventEmitter {
         
         // Bind event handlers
         this.setupEventHandlers();
+
+        this.maxOptimizedEvents = 10000; // Limit for optimized events
+        this.aiSummaryManager = null; // Initialize to null
+        
+        // Pause/resume state
+        this.isPaused = false;
+        this.pauseStartTime = null;
     }
     
     /**
@@ -193,15 +200,10 @@ class TrackerStore extends EventEmitter {
      */
     async processBatch(batch) {
         try {
-            console.log(`🔧 Processing batch with ${batch.events.length} events...`);
-            console.log(`🔧 TokenOptimizer instance:`, !!this.tokenOptimizer);
-            
             // Optimize the batch using token optimizer
             const optimizedEvents = this.tokenOptimizer.optimizeSessionData({
                 events: batch.events
             });
-            
-            console.log(`🔧 TokenOptimizer result: ${batch.events.length} → ${optimizedEvents.length} events`);
             
             // Store optimized events locally
             await this.storeOptimizedEvents(optimizedEvents, batch.id);
@@ -226,8 +228,10 @@ class TrackerStore extends EventEmitter {
                 }
             });
             
-            console.log(`✅ Batch processed: ${batch.events.length} → ${optimizedEvents.length} events (${tokenReduction.reductionPercent}% reduction)`);
-            console.log(`📊 Total optimized events in memory: ${this.optimizedEventsMemory.length}`);
+            // Only log every 5th batch to reduce noise
+            if (this.state.stats.batchCount % 5 === 0) {
+                console.log(`✅ Batch processed: ${batch.events.length} → ${optimizedEvents.length} events (${tokenReduction.reductionPercent}% reduction)`);
+            }
             
             this.emit('batchReady', {
                 ...batch,
@@ -263,7 +267,10 @@ class TrackerStore extends EventEmitter {
                 }
             });
             
-            console.log(`📁 Raw event stored (Total in memory: ${this.rawEventsMemory.length})`);
+            // Only log every 10th event to reduce noise
+            if (this.rawEventsMemory.length % 10 === 0) {
+                console.log(`📁 Raw event stored (Total in memory: ${this.rawEventsMemory.length})`);
+            }
             
         } catch (error) {
             console.error('❌ Failed to store raw event:', error);
@@ -296,7 +303,10 @@ class TrackerStore extends EventEmitter {
             
             await fs.writeFile(filepath, JSON.stringify(data, null, 2));
             
-            console.log(`📁 Optimized events stored (Total in memory: ${this.optimizedEventsMemory.length})`);
+            // Only log every 5th batch to reduce noise
+            if (this.optimizedEventsMemory.length % 5 === 0) {
+                console.log(`📁 Optimized events stored (Total in memory: ${this.optimizedEventsMemory.length})`);
+            }
             
         } catch (error) {
             console.error('❌ Failed to store optimized events:', error);
@@ -388,15 +398,15 @@ class TrackerStore extends EventEmitter {
     }
     
     /**
-     * Stop tracking session
+     * Stop the current tracking session
      */
     async stopSession() {
-        if (!this.state.isTracking) {
-            console.log('⚠️ TrackerStore: No active session to stop');
-            return;
-        }
-        
         try {
+            if (!this.state.isTracking) {
+                console.log('⚠️ TrackerStore: No active session to stop');
+                return;
+            }
+            
             console.log('🛑 TrackerStore: Stopping tracking session...');
             this.updateState({ status: 'stopping' });
             
@@ -414,6 +424,13 @@ class TrackerStore extends EventEmitter {
             console.log('🛑 TrackerStore: Stopping AI processing...');
             this.stopPeriodicAIProcessing();
             console.log('✅ TrackerStore: AI processing stopped');
+            
+            // Stop AI Summary Manager if active
+            if (this.aiSummaryManager) {
+                console.log('🛑 TrackerStore: Stopping AI Summary Manager...');
+                await this.aiSummaryManager.endSession();
+                console.log('✅ TrackerStore: AI Summary Manager stopped');
+            }
             
             // Update state to stopped
             this.updateState({
@@ -463,15 +480,22 @@ class TrackerStore extends EventEmitter {
      * Start periodic AI processing of optimized data
      */
     startPeriodicAIProcessing() {
+        // Don't start periodic AI processing if AI Summary Manager is active
+        if (this.aiSummaryManager) {
+            console.log('🤖 Skipping periodic AI processing - AI Summary Manager is active');
+            return;
+        }
+        
         if (this.aiProcessingInterval) {
             clearInterval(this.aiProcessingInterval);
         }
         
-        console.log('🤖 Starting periodic AI processing (every 1 minute)...');
+        console.log('🤖 Starting periodic AI processing (every 15 minutes)...');
         
         this.aiProcessingInterval = setInterval(() => {
+            console.log('⏰ [AI DEBUG] 15-minute AI processing timer triggered');
             this.processNewDataWithAI();
-        }, 60000); // 1 minute
+        }, 900000); // 15 minutes
         
         // Also process immediately if there's data
         setTimeout(() => {
@@ -498,14 +522,23 @@ class TrackerStore extends EventEmitter {
             // Get new optimized events since last processing
             const newEvents = this.optimizedEventsMemory.slice(this.lastAIProcessedIndex);
             
-            console.log(`🔍 AI Processing: ${this.optimizedEventsMemory.length} total, ${newEvents.length} new events`);
-            
             if (newEvents.length === 0) {
-                console.log('⚠️ No new optimized events to process with AI');
+                console.log('⚠️ [AI DEBUG] No new optimized events to process with AI');
                 return;
             }
             
-            console.log(`🤖 Processing ${newEvents.length} new optimized events with AI...`);
+            // 🔍 TOKEN DEBUGGING
+            const eventsJsonString = JSON.stringify(newEvents);
+            const dataLength = eventsJsonString.length;
+            const estimatedTokens = Math.ceil(dataLength / 4); // Rough estimate
+            
+            console.log(`🤖 [AI DEBUG] Processing ${newEvents.length} new optimized events with AI...`);
+            console.log(`🔍 [AI DEBUG] Events data length: ${dataLength} characters`);
+            console.log(`🔍 [AI DEBUG] Estimated tokens for events: ${estimatedTokens}`);
+            
+            if (estimatedTokens > 20000) {
+                console.warn(`⚠️ [AI WARNING] High token count: ${estimatedTokens} tokens (may exceed limits)`);
+            }
             
             // Send to main process for AI analysis
             this.emit('aiProcessingRequest', {
@@ -860,6 +893,82 @@ class TrackerStore extends EventEmitter {
         } catch (error) {
             console.error(`❌ Failed to get stats for ${dirPath}:`, error);
             return { fileCount: 0, totalSize: 0, averageFileSize: 0 };
+        }
+    }
+
+    /**
+     * Pause the tracking session (for breaks)
+     */
+    async pauseSession(reason = 'manual') {
+        try {
+            if (!this.state.isTracking) {
+                console.log('⚠️ TrackerStore: No active session to pause');
+                return { success: false, error: 'No active session' };
+            }
+            
+            if (this.isPaused) {
+                console.log('⚠️ TrackerStore: Session already paused');
+                return { success: true, reason };
+            }
+            
+            console.log(`⏸️ TrackerStore: Pausing tracking session (${reason})...`);
+            this.isPaused = true;
+            this.pauseStartTime = new Date();
+            
+            // Pause the agent manager (stop data collection)
+            if (this.agentManager) {
+                await this.agentManager.pause();
+            }
+            
+            // Pause AI processing
+            if (this.aiSummaryManager) {
+                this.aiSummaryManager.pause();
+            }
+            
+            console.log('✅ TrackerStore: Session paused successfully');
+            return { success: true, reason };
+            
+        } catch (error) {
+            console.error('❌ TrackerStore: Error pausing session:', error);
+            return { success: false, error: error.message };
+        }
+    }
+    
+    /**
+     * Resume the tracking session (from breaks) 
+     */
+    async resumeSession() {
+        try {
+            if (!this.state.isTracking) {
+                console.log('⚠️ TrackerStore: No active session to resume');
+                return { success: false, error: 'No active session' };
+            }
+            
+            if (!this.isPaused) {
+                console.log('⚠️ TrackerStore: Session not paused');
+                return { success: true };
+            }
+            
+            console.log('▶️ TrackerStore: Resuming tracking session...');
+            this.isPaused = false;
+            this.pauseStartTime = null;
+            
+            // Resume the agent manager (restart data collection)
+            if (this.agentManager) {
+                await this.agentManager.resume();
+            }
+            
+            // Resume AI processing
+            if (this.aiSummaryManager) {
+                this.aiSummaryManager.resume();
+            }
+            
+            console.log('✅ TrackerStore: Session resumed successfully');
+            return { success: true };
+            
+        } catch (error) {
+            console.error('❌ TrackerStore: Error resuming session:', error);
+            return { success: false, error: error.message };
         }
     }
 }

@@ -573,6 +573,11 @@ class TokenOptimizer {
       const snapshotTime = new Date(snapshotEvent.timestamp).getTime();
       const snapshotApp = snapshotEvent.window_title || snapshotEvent.app_name;
       
+      // If no app info available, default to keeping snapshot
+      if (!snapshotApp) {
+        return true;
+      }
+      
       // Look for recent application_change events within 5 seconds
       const recentAppChanges = filteredEvents
         .filter(e => e.type === 'application_change' || e.type === 'window_change')
@@ -592,7 +597,11 @@ class TokenOptimizer {
       const activeApp = mostRecentAppChange.app_name || mostRecentAppChange.window_title;
       
       // Allow snapshot if it matches the active app or if no clear active app
-      return !activeApp || snapshotApp === activeApp || snapshotApp.includes(activeApp) || activeApp.includes(snapshotApp);
+      if (!activeApp) {
+        return true;
+      }
+      
+      return snapshotApp === activeApp || snapshotApp.includes(activeApp) || activeApp.includes(snapshotApp);
     }
   
     /**
@@ -819,10 +828,13 @@ class TokenOptimizer {
                              url.trim().length > 0;
            const isNotTooSoon = eventTime - lastSnapshotTime >= this.config.minTimeBetweenSnapshots;
            
+           // Check for important activities (video posting, content creation, etc.)
+           const isImportantActivity = this.isImportantActivity(event);
+           
            // NEW: Only snapshot active app - check if this snapshot is from a recent app change
            const isFromActiveApp = this.isSnapshotFromActiveApp(event, filtered);
            
-           if (hasContent && isNotTooSoon && !this.isUselessSnapshot(event) && isFromActiveApp) {
+           if (hasContent && isNotTooSoon && !this.isUselessSnapshot(event) && (isFromActiveApp || isImportantActivity)) {
              filtered.push(event);
              lastSnapshotTime = eventTime;
              console.log(`✅ Kept active app snapshot: "${contentPreview.substring(0,30) || windowTitle.substring(0,30) || url.substring(0,30)}..."`);
@@ -892,6 +904,41 @@ class TokenOptimizer {
        }
   
        return filtered;
+     }
+  
+        /**
+     * Check if an event represents important activity that should be preserved
+     */
+    isImportantActivity(event) {
+      const content = event.content_preview || event.content || event.text || '';
+      const windowTitle = event.window_title || '';
+      const url = event.url || '';
+      const appName = event.app_name || '';
+      
+      // Video posting and content creation indicators
+      const videoKeywords = ['upload', 'post', 'publish', 'share', 'export', 'render', 'capcut', 'video', 'youtube', 'tiktok', 'instagram'];
+      const contentKeywords = ['create', 'write', 'edit', 'design', 'build', 'develop', 'code', 'commit', 'save', 'submit'];
+      
+      const allText = `${content} ${windowTitle} ${url} ${appName}`.toLowerCase();
+      
+      // Check for video/content creation activities
+      if (videoKeywords.some(keyword => allText.includes(keyword))) {
+        console.log(`✨ Important activity detected (video/posting): ${allText.substring(0, 50)}...`);
+        return true;
+      }
+      
+      if (contentKeywords.some(keyword => allText.includes(keyword))) {
+        console.log(`✨ Important activity detected (content creation): ${allText.substring(0, 50)}...`);
+        return true;
+      }
+      
+      // Check for file operations that indicate completion
+      if (allText.includes('save') || allText.includes('export') || allText.includes('download')) {
+        console.log(`✨ Important activity detected (file operation): ${allText.substring(0, 50)}...`);
+        return true;
+      }
+      
+      return false;
      }
   
     /**

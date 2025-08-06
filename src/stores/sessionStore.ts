@@ -152,6 +152,13 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
   // Session actions
   startSession: async () => {
+    // Prevent multiple simultaneous starts
+    const state = get();
+    if (state.isActive) {
+      console.log('⚠️ [SESSION] Session already active, ignoring start request');
+      return;
+    }
+    
     // Generate proper UUIDs for both session and AI memory tracking
     const sessionId = crypto.randomUUID();
     const summaryId = crypto.randomUUID();
@@ -203,10 +210,25 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     const endTime = new Date();
     const state = get();
     
+    // If currently on break, end the break first and add its time
+    let totalBreakTime = state.currentMetrics.breakTime;
+    if (state.isOnBreak && state.breakStartTime) {
+      const currentBreakDuration = Math.floor((endTime.getTime() - state.breakStartTime.getTime()) / 1000);
+      totalBreakTime += currentBreakDuration;
+      console.log('🔔 [SESSION] Ending session while on break, adding current break time:', currentBreakDuration, 'seconds');
+    }
+    
     // Calculate session metrics
     const sessionDurationMs = state.startTime ? endTime.getTime() - state.startTime.getTime() : 0;
-    const activeSecs = Math.floor((sessionDurationMs - state.currentMetrics.breakTime * 1000) / 1000);
-    const idleSecs = Math.floor(state.currentMetrics.breakTime);
+    const totalSessionSecs = Math.floor(sessionDurationMs / 1000);
+    const activeSecs = Math.max(0, totalSessionSecs - totalBreakTime);
+    const idleSecs = totalBreakTime;
+    
+    console.log('📊 [SESSION] Final metrics:', {
+      totalDuration: Math.floor(totalSessionSecs / 60) + 'm',
+      activeTime: Math.floor(activeSecs / 60) + 'm', 
+      breakTime: Math.floor(idleSecs / 60) + 'm'
+    });
     
     // Update session in Supabase
     if (state.sessionId) {
@@ -234,8 +256,19 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     console.log('🏁 [SESSION] Ended session');
   },
 
-  startBreak: () => {
+  startBreak: async () => {
     const breakStartTime = new Date();
+    
+    // Pause the tracker system
+    try {
+      if (window.electronAPI) {
+        await window.electronAPI.pauseSession('break');
+        console.log('⏸️ [SESSION] Tracker paused for break');
+      }
+    } catch (error) {
+      console.error('❌ [SESSION] Failed to pause tracker:', error);
+    }
+    
     set({
       isOnBreak: true,
       breakStartTime
@@ -247,25 +280,37 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     console.log('☕ [SESSION] Started break');
   },
 
-  endBreak: () => {
+  endBreak: async () => {
     const state = get();
     const breakDuration = state.breakStartTime 
       ? Date.now() - state.breakStartTime.getTime()
       : 0;
+    
+    console.log('🚀 [SESSION] Ending break, duration:', Math.floor(breakDuration / 1000), 'seconds');
+    
+    // Resume the tracker system
+    try {
+      if (window.electronAPI) {
+        await window.electronAPI.resumeSession();
+        console.log('▶️ [SESSION] Tracker resumed from break');
+      }
+    } catch (error) {
+      console.error('❌ [SESSION] Failed to resume tracker:', error);
+    }
     
     set({
       isOnBreak: false,
       breakStartTime: null,
       currentMetrics: {
         ...state.currentMetrics,
-        breakTime: state.currentMetrics.breakTime + breakDuration
+        breakTime: state.currentMetrics.breakTime + Math.floor(breakDuration / 1000) // Convert to seconds
       }
     });
     
     // Auto-save after ending break
     setTimeout(() => get().saveSession(), 100);
     
-    console.log('🚀 [SESSION] Ended break');
+    console.log('🚀 [SESSION] Break ended, total break time:', Math.floor((state.currentMetrics.breakTime + Math.floor(breakDuration / 1000)) / 60), 'minutes');
   },
 
   // Todo management
@@ -286,6 +331,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     setTimeout(() => get().saveSession(), 100);
     
     console.log('✅ [SESSION] Added todo:', text);
+    return todo.id; // Return the ID for immediate use
   },
 
   completeTodo: (todoId: string, completedBy: 'user' | 'ai' = 'user', aiConfidence?: 'possible' | 'likely' | 'definite') => {

@@ -64,7 +64,7 @@ export class AISummaryManager {
   private intervalTimer: NodeJS.Timeout | null = null;
   private chunkNumber: number = 0;
   private lastProcessedTime: Date | null = null;
-  private intervalDuration: number = 10 * 60 * 1000; // 10 minutes for optimal work day analysis
+  private intervalDuration: number = 15 * 60 * 1000; // 15 minutes
   private accumulatedEvents: any[] = [];
   private appUsageTracker: Record<string, number> = {};
   private lastAppChangeTime: Date | null = null;
@@ -321,14 +321,69 @@ export class AISummaryManager {
   /**
    * Generate summary for the current interval
    */
+  /**
+   * Check if any todos should be marked as completed based on activity
+   */
+  private async checkTodoCompletion(): Promise<void> {
+    try {
+      const { sessionTodos } = useSessionStore.getState();
+      const incompleteTodos = sessionTodos.filter(todo => !todo.completed);
+      
+      if (incompleteTodos.length === 0) return;
+      
+             // Create a prompt to ask about todo completion with recent activity context  
+       const recentEvents = this.accumulatedEvents.slice(-50); // Last 50 events for context
+      
+      const prompt = `Based on the recent activity, were any of these todos completed?
+      
+Current incomplete todos:
+${incompleteTodos.map((todo, i) => `${i + 1}. ${todo.text}`).join('\n')}
+
+ Recent activity context:
+ ${recentEvents.map((e: any) => `${e.app_name}: ${e.content_preview || e.window_title || 'activity'}`).slice(-10).join('\n')}
+
+Please respond with ONLY a JSON object:
+{
+  "todoConfirmations": [
+    {"todoText": "exact text", "completed": true/false, "confidence": "high/medium/low", "evidence": "brief reason"}
+  ],
+  "newTaskSuggestions": ["up to 3 new tasks based on current activity"]
+}`;
+
+      // Send to AI for analysis
+      if (window.electronAPI?.tracker?.askTodoCompletion) {
+        window.electronAPI.tracker.askTodoCompletion({
+          prompt,
+          todos: incompleteTodos,
+          timestamp: new Date().toISOString()
+        });
+      }
+      
+    } catch (error) {
+      console.error('❌ Error checking todo completion:', error);
+    }
+  }
+
   private async generateIntervalSummary(): Promise<void> {
-    if (!this.sessionData?.isActive || !this.lastProcessedTime) return;
+    if (!this.sessionData?.isActive || !this.lastProcessedTime) {
+      console.log('⚠️ [AI SUMMARY] Skipping summary generation - session not active or no last processed time');
+      return;
+    }
 
     try {
       const now = new Date();
       this.chunkNumber++;
 
-      console.log(`🤖 Generating AI summary for chunk ${this.chunkNumber} with enhanced metrics...`);
+      console.log(`🤖 [AI SUMMARY] === GENERATING AI SUMMARY CHUNK ${this.chunkNumber} ===`);
+      console.log(`📊 [AI SUMMARY] Accumulated events: ${this.accumulatedEvents.length}`);
+      console.log(`📊 [AI SUMMARY] Session active: ${this.sessionData.isActive}`);
+      console.log(`📊 [AI SUMMARY] Time since last summary: ${Math.round((now.getTime() - this.lastProcessedTime.getTime()) / 60000)} minutes`);
+
+      // Check if we have enough data to generate a meaningful summary
+      if (this.accumulatedEvents.length === 0) {
+        console.log('⚠️ [AI SUMMARY] No events accumulated, skipping summary generation');
+        return;
+      }
 
       // Get current session todos
       const sessionStore = useSessionStore.getState();
@@ -346,11 +401,11 @@ export class AISummaryManager {
       // Optimize the accumulated events before sending to AI (if optimizer is available)
       let optimizedEvents = this.accumulatedEvents;
       if (this.optimizer) {
-        console.log(`🔧 Optimizing ${this.accumulatedEvents.length} raw events...`);
+        console.log(`🔧 [AI SUMMARY] Optimizing ${this.accumulatedEvents.length} raw events...`);
         optimizedEvents = this.optimizer.optimizeSessionData(this.accumulatedEvents);
-        console.log(`🔧 Optimized to ${optimizedEvents.length} events`);
+        console.log(`🔧 [AI SUMMARY] Optimized to ${optimizedEvents.length} events`);
       } else {
-        console.log(`📊 Using ${this.accumulatedEvents.length} raw events (no optimizer available)`);
+        console.log(`📊 [AI SUMMARY] Using ${this.accumulatedEvents.length} raw events (no optimizer available)`);
       }
 
       // Calculate compression ratio and finalize enhanced metrics
@@ -400,7 +455,7 @@ export class AISummaryManager {
       };
       this.inMemoryDataStore.push(dataSnapshot);
 
-      console.log(`📊 Enhanced metrics summary:`, {
+      console.log(`📊 [AI SUMMARY] Enhanced metrics summary:`, {
         totalApps: Object.keys(this.enhancedMetrics.perAppUsage).length,
         activeMinutes: this.enhancedMetrics.activeTime.totalActiveMinutes.toFixed(1),
         activityBursts: this.enhancedMetrics.activeTime.activityBursts.length,
@@ -408,6 +463,7 @@ export class AISummaryManager {
       });
 
       // Generate AI analysis with enhanced data and memory context
+      console.log('🤖 [AI SUMMARY] Calling AI summary service...');
       const analysis = await aiSummaryService.processOptimizedData(
         optimizedEvents,
         sessionTodos,
@@ -416,6 +472,8 @@ export class AISummaryManager {
       );
 
       if (analysis) {
+        console.log('✅ [AI SUMMARY] AI analysis completed successfully');
+        
         // Create enhanced local summary object for UI display
         const localSummary = {
           id: `local_${this.sessionData.sessionId}_${this.chunkNumber}`,
@@ -423,7 +481,7 @@ export class AISummaryManager {
           summary_text: analysis.summaryText,
           created_at: now.toISOString(),
           chunk_number: this.chunkNumber,
-          time_window: `Interval ${this.chunkNumber} (5-min AI summary)`,
+          time_window: `Interval ${this.chunkNumber} (15-min AI summary)`,
           summary_type: 'interval',
           productivity_score: analysis.productivityPct,
           productivity: analysis.productivityPct, // For UI compatibility
@@ -492,23 +550,32 @@ export class AISummaryManager {
         );
 
         if (saved) {
-          console.log(`✅ Enhanced AI summary chunk ${this.chunkNumber} generated and saved to database`);
+          console.log(`✅ [AI SUMMARY] Enhanced AI summary chunk ${this.chunkNumber} generated and saved to database`);
         } else {
-          console.log(`⚠️ Enhanced AI summary chunk ${this.chunkNumber} generated but not saved to database (showing locally)`);
+          console.log(`⚠️ [AI SUMMARY] Enhanced AI summary chunk ${this.chunkNumber} generated but not saved to database (showing locally)`);
         }
         
-        console.log(`📊 Productivity Score: ${analysis.productivityPct}/100 (${localSummary.focus_level} focus)`);
-        console.log(`📊 Active Time: ${this.enhancedMetrics.activeTime.totalActiveMinutes.toFixed(1)} minutes`);
+        console.log(`📊 [AI SUMMARY] Productivity Score: ${analysis.productivityPct}/100 (${localSummary.focus_level} focus)`);
+        console.log(`📊 [AI SUMMARY] Active Time: ${this.enhancedMetrics.activeTime.totalActiveMinutes.toFixed(1)} minutes`);
         
         // Process AI todo analysis and update todos accordingly
         this.processTodoAnalysis(analysis);
+      } else {
+        console.error('❌ [AI SUMMARY] AI analysis failed - no summary generated');
       }
 
       // Reset for next interval
       this.resetIntervalData(now);
 
     } catch (error) {
-      console.error('❌ Failed to generate enhanced interval summary:', error);
+      console.error('❌ [AI SUMMARY] Failed to generate enhanced interval summary:', error);
+      console.error('❌ [AI SUMMARY] Error details:', {
+        message: error.message,
+        stack: error.stack,
+        sessionActive: this.sessionData?.isActive,
+        lastProcessedTime: this.lastProcessedTime,
+        accumulatedEvents: this.accumulatedEvents.length
+      });
     }
   }
 
@@ -516,17 +583,43 @@ export class AISummaryManager {
    * Store summary locally and notify UI
    */
   private storeLocalSummary(summary: any): void {
-    // Add to local storage
-    if (!this.localSummaries) {
-      this.localSummaries = [];
+    try {
+      console.log('📱 [AI SUMMARY] Storing local summary for UI display...');
+      
+      // Add to local storage
+      if (!this.localSummaries) {
+        this.localSummaries = [];
+      }
+      this.localSummaries.push(summary);
+      
+      // Notify session summary store to update UI
+      try {
+        const sessionSummaryStore = useSessionSummaryStore.getState();
+        sessionSummaryStore.addLocalSummary(summary);
+        console.log('✅ [AI SUMMARY] Summary added to UI store successfully');
+      } catch (storeError) {
+        console.error('❌ [AI SUMMARY] Failed to add summary to UI store:', storeError);
+        console.error('❌ [AI SUMMARY] Store error details:', {
+          message: storeError.message,
+          summaryId: summary.id,
+          summaryText: summary.summary_text?.substring(0, 50)
+        });
+      }
+      
+      console.log(`📱 [AI SUMMARY] AI summary displayed locally: ${summary.summary_text?.substring(0, 100) || 'No summary text'}...`);
+      console.log(`📊 [AI SUMMARY] Local summaries count: ${this.localSummaries.length}`);
+      
+    } catch (error) {
+      console.error('❌ [AI SUMMARY] Failed to store local summary:', error);
+      console.error('❌ [AI SUMMARY] Store error details:', {
+        message: error.message,
+        summary: summary ? {
+          id: summary.id,
+          sessionId: summary.session_id,
+          hasText: !!summary.summary_text
+        } : 'No summary object'
+      });
     }
-    this.localSummaries.push(summary);
-    
-    // Notify session summary store to update UI
-    const sessionSummaryStore = useSessionSummaryStore.getState();
-    sessionSummaryStore.addLocalSummary(summary);
-    
-    console.log(`📱 AI summary displayed locally: ${summary.summary_text.substring(0, 100)}...`);
   }
 
   /**
@@ -698,19 +791,10 @@ export class AISummaryManager {
       const finalAnalysis = await aiSummaryService.generateFinalSessionSummary(summaries, sessionData);
 
       if (finalAnalysis) {
-        // Save final summary
-        const prompt = `Final session analysis: ${this.sessionData.sessionId}`;
-        const saved = await aiSummaryService.saveFinalSessionSummary(
-          this.sessionData.sessionId,
-          this.sessionData.userId,
-          finalAnalysis,
-          prompt
-        );
+        // Final analysis is already complete, just log it
+        console.log('✅ Final session analysis completed:', finalAnalysis);
 
-        if (saved) {
-          console.log('✅ Final session summary generated and saved');
-          console.log(`📊 Overall Productivity: ${finalAnalysis.productivity_score}/100`);
-        }
+        console.log(`📊 Overall Productivity: ${finalAnalysis.productivity_score}/100`);
 
         return finalAnalysis;
       }
@@ -818,9 +902,33 @@ export class AISummaryManager {
    * Manually trigger interval summary (for testing)
    */
   async triggerManualSummary(): Promise<void> {
-    if (this.sessionData?.isActive) {
-      await this.generateIntervalSummary();
+    console.log('🔧 [AI SUMMARY] === MANUAL SUMMARY TRIGGER ===');
+    console.log('🔧 [AI SUMMARY] Session active:', this.sessionData?.isActive);
+    console.log('🔧 [AI SUMMARY] Accumulated events:', this.accumulatedEvents.length);
+    console.log('🔧 [AI SUMMARY] Last processed time:', this.lastProcessedTime);
+    
+    if (!this.sessionData?.isActive) {
+      console.error('❌ [AI SUMMARY] Cannot trigger manual summary - session not active');
+      return;
     }
+    
+    if (this.accumulatedEvents.length === 0) {
+      console.warn('⚠️ [AI SUMMARY] No events to summarize, adding some test data...');
+      // Add some test events to ensure we can generate a summary
+      this.accumulatedEvents = [
+        {
+          timestamp: new Date().toISOString(),
+          type: 'test_event',
+          app_name: 'Test App',
+          content_preview: 'Manual summary test',
+          window_title: 'Test Window'
+        }
+      ];
+    }
+    
+    console.log('🔧 [AI SUMMARY] Triggering manual summary generation...');
+    await this.generateIntervalSummary();
+    console.log('✅ [AI SUMMARY] Manual summary generation completed');
   }
 
   /**

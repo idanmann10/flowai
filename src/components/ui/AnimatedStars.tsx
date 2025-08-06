@@ -62,36 +62,6 @@ const AnimatedStars: React.FC<AnimatedStarsProps> = ({
     }
   }, [stars, maxStars, animated])
   
-  // Create keyframes for animation
-  const createPulseAnimation = (index: number) => {
-    const keyframeName = `starPulse${index}`
-    
-    // Only create the keyframe if it doesn't exist
-    if (!document.querySelector(`style[data-keyframe="${keyframeName}"]`)) {
-      const style = document.createElement('style')
-      style.setAttribute('data-keyframe', keyframeName)
-      style.textContent = `
-        @keyframes ${keyframeName} {
-          0% {
-            transform: scale(1);
-            filter: drop-shadow(0 0 8px #FFD700);
-          }
-          50% {
-            transform: scale(1.2);
-            filter: drop-shadow(0 0 16px #FFD700);
-          }
-          100% {
-            transform: scale(1.1);
-            filter: drop-shadow(0 0 8px #FFD700);
-          }
-        }
-      `
-      document.head.appendChild(style)
-    }
-    
-    return keyframeName
-  }
-  
   return (
     <div 
       className={className}
@@ -106,20 +76,17 @@ const AnimatedStars: React.FC<AnimatedStarsProps> = ({
       {Array.from({ length: maxStars }, (_, index) => {
         const isActive = index < stars
         const isAnimated = animatedStars[index]
-        const keyframeName = createPulseAnimation(index)
         
         return (
           <div
             key={index}
             style={{
               fontSize: currentSize.fontSize,
-              transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+              transition: 'all 0.3s ease',
               transform: isActive && isAnimated ? 'scale(1.1)' : 'scale(1)',
-              filter: isActive ? 'drop-shadow(0 0 8px #FFD700)' : 'none',
               color: isActive ? '#FFD700' : '#666666',
               opacity: isActive ? 1 : 0.4,
-              cursor: 'default',
-              animation: isActive && isAnimated && animated ? `${keyframeName} 2s ease-in-out` : 'none'
+              cursor: 'default'
             }}
           >
             {isActive ? '⭐' : '☆'}

@@ -291,6 +291,30 @@ export const SessionManager: React.FC = () => {
           >
             {loading && isTracking ? '⏳' : '⏹️'} Stop Session
           </button>
+
+          <button
+            onClick={async () => {
+              try {
+                console.log('🔧 [TEST] Manual AI summary trigger clicked');
+                // Try to trigger AI summary through the pipeline
+                await memoryAIPipeline.triggerManualOptimization();
+                console.log('✅ [TEST] Manual optimization triggered');
+              } catch (error) {
+                console.error('❌ [TEST] Failed to trigger manual optimization:', error);
+              }
+            }}
+            disabled={!isTracking}
+            style={{
+              backgroundColor: !isTracking ? '#6b7280' : '#3b82f6',
+              color: 'white',
+              border: 'none',
+              borderRadius: '6px',
+              padding: '12px 24px',
+              cursor: !isTracking ? 'not-allowed' : 'pointer'
+            }}
+          >
+            🤖 Test AI Summary
+          </button>
         </div>
 
         {currentSession && (
