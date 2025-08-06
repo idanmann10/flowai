@@ -208,6 +208,8 @@ const ActiveSession: React.FC = () => {
 
   // Additional check for session end - listen for session summary store changes
   useEffect(() => {
+    if (!isActive) return
+    
     const checkForSessionEnd = () => {
       const { showSummaryModal, currentSessionId, sessionDuration } = useSessionSummaryStore.getState()
       
@@ -236,7 +238,7 @@ const ActiveSession: React.FC = () => {
     }, 5000)
     
     return () => clearInterval(interval)
-  }, [navigate])
+  }, [navigate, isActive])
 
   // Update real-time data every 5 seconds
   useEffect(() => {
@@ -387,13 +389,23 @@ const ActiveSession: React.FC = () => {
     }
   }, [isActive])
 
-  // Update current time every second
+  // Cleanup timers when component unmounts or session becomes inactive
   useEffect(() => {
+    return () => {
+      console.log('🧹 Component unmounting - stopping timer')
+      // The timer cleanup is handled by the useEffect return functions
+    }
+  }, [])
+
+  // Update current time every second (only when session is active)
+  useEffect(() => {
+    if (!isActive) return
+    
     const interval = setInterval(() => {
       setCurrentTime(new Date())
     }, 1000)
     return () => clearInterval(interval)
-  }, [])
+  }, [isActive])
 
   // Track progress until next AI analysis
   useEffect(() => {

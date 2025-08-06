@@ -16,6 +16,7 @@ import {
   IconChartBar
 } from '@tabler/icons-react'
 import { useSessionSummaryStore } from '../stores/sessionSummaryStore'
+import { useSessionStore } from '../stores/sessionStore'
 import { useAuth } from '../stores/authStore'
 import { AnimatedStars, Fireworks, SparkleParticles } from '../components/ui'
 import { ProductivityGraph } from '../components/ProductivityGraph'
@@ -48,14 +49,15 @@ const SessionCompletion: React.FC = () => {
   } = useSessionSummaryStore()
 
   // Get actual session data from sessionStore for accurate duration
-  const { startTime, currentMetrics, isOnBreak, breakStartTime } = useSessionStore()
+  const { startTime, endTime, currentMetrics, isOnBreak, breakStartTime } = useSessionStore()
   
   // Calculate actual session duration (active time only)
   const getActualSessionDuration = () => {
     if (!startTime) return 0
     
-    const endTime = new Date()
-    const totalElapsed = Math.floor((endTime.getTime() - startTime.getTime()) / 1000)
+    // Use session end time if available, otherwise use current time
+    const sessionEndTime = endTime || new Date()
+    const totalElapsed = Math.floor((sessionEndTime.getTime() - startTime.getTime()) / 1000)
     
     // Subtract break time to get active session time
     const breakTimeSeconds = currentMetrics.breakTime
@@ -63,13 +65,13 @@ const SessionCompletion: React.FC = () => {
     // Add current break time if we're currently on break
     let currentBreakTime = 0
     if (isOnBreak && breakStartTime) {
-      currentBreakTime = Math.floor((endTime.getTime() - breakStartTime.getTime()) / 1000)
+      currentBreakTime = Math.floor((sessionEndTime.getTime() - breakStartTime.getTime()) / 1000)
     }
     
     return Math.max(0, totalElapsed - breakTimeSeconds - currentBreakTime)
   }
   
-  const sessionDuration = getActualSessionDuration()
+  const sessionDuration = React.useMemo(() => getActualSessionDuration(), [startTime, endTime, currentMetrics.breakTime, isOnBreak, breakStartTime])
 
   // Add debug logging at component mount
   console.log('🚀 SessionCompletion: Component mounted with state:', {
