@@ -15,7 +15,7 @@ NC='\033[0m' # No Color
 echo -e "${BLUE}🚀 Notarizing Electron-Forge DMG${NC}"
 
 # Use the latest DMG from electron-forge
-DMG_PATH="out/make/Flow AI-1.0.3-arm64.dmg"
+DMG_PATH="out/make/Flow AI-1.0.6-arm64.dmg"
 
 if [ ! -f "$DMG_PATH" ]; then
     echo -e "${RED}❌ DMG not found: $DMG_PATH${NC}"
