@@ -9,12 +9,41 @@ let trackerStore: any = null
 
 // Import AI Summary Service
 console.log('🔧 MAIN: Importing AI Summary Service...')
-let aiSummaryService: any = null
+let aiSummaryService: any = null;
+
+// Global reference for AI summary communication
+(global as any).mainWindow = null
+
+let mainWindow: BrowserWindow | null = null
+let tray: Tray | null = null
+
+const isDev = process.env.NODE_ENV === 'development'
+const port = process.env.PORT || 5173
+
+// TrackerStore state
+let isTrackerRunning = false
+let trackerSessionId: string | null = null
+
+// AI Processing state
+let currentSessionTodos: any[] = []
+let currentDailyGoal: string | null = null
+let latestAIResults: any[] = []
 
 // Top-level try/catch for TrackerStore and AI Summary Service
 try {
   console.log('🔍 MAIN DEBUG: Loading TrackerStore...')
-  const TrackerStore = require('../tracker/v3/connector/tracker-store')
+  
+  // Use different paths for development vs production
+  let TrackerStore;
+  if (isDev) {
+    // In development, main.ts is run from electron/ directory, so use relative path from there
+    console.log('🔍 MAIN DEBUG: Loading TrackerStore from development path: ../tracker/v3/connector/tracker-store');
+    TrackerStore = require('../tracker/v3/connector/tracker-store');
+  } else {
+    // In production, main.ts is at /electron/main.ts in asar, so use relative path from there
+    console.log('🔍 MAIN DEBUG: Loading TrackerStore from production path: ../../tracker/v3/connector/tracker-store');
+    TrackerStore = require('../../tracker/v3/connector/tracker-store');
+  }
   
   console.log('🔍 MAIN DEBUG: TrackerStore loaded, creating instance...')
   // Create TrackerStore instance
@@ -48,24 +77,6 @@ try {
     console.error('❌ MAIN: Error details:', error)
   }
 }
-
-// Global reference for AI summary communication
-(global as any).mainWindow = null
-
-let mainWindow: BrowserWindow | null = null
-let tray: Tray | null = null
-
-const isDev = process.env.NODE_ENV === 'development'
-const port = process.env.PORT || 5173
-
-// TrackerStore state
-let isTrackerRunning = false
-let trackerSessionId: string | null = null
-
-// AI Processing state
-let currentSessionTodos: any[] = []
-let currentDailyGoal: string | null = null
-let latestAIResults: any[] = []
 
 // Setup IPC handlers for tracker communication
 function setupTrackerIPC() {
@@ -262,7 +273,7 @@ function setupTrackerIPC() {
       return { success: true };
     } catch (error) {
       console.error('❌ Error recording task rejection:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
   });
 
@@ -294,7 +305,7 @@ function setupTrackerIPC() {
       return { success: true };
     } catch (error) {
       console.error('❌ Error asking about todo completion:', error);
-      return { success: false, error: error.message };
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
   });
 }
@@ -361,7 +372,7 @@ async function handleAIProcessingRequest(data: any) {
 
 function createWindow() {
   // Create the browser window.
-  mainWindow = new BrowserWindow({
+  mainWindow = new (BrowserWindow as any)({
     width: 1200,
     height: 800,
     frame: true, // Enable native window controls
@@ -386,15 +397,39 @@ function createWindow() {
 
   // Load the app
   if (isDev) {
-    // In development, load from Vite dev server
+    // In development, try dev server first, then fallback to built files
     console.log('🔧 DEBUG: Loading from dev server:', `http://localhost:${port}`)
+    
+    // Try to load from dev server, but immediately fallback if it fails
     mainWindow?.loadURL(`http://localhost:${port}`).catch(err => {
-      if (err instanceof Error) {
-        console.error('❌ DEBUG: Failed to load dev server:', err.message)
-      } else {
-        console.error('❌ DEBUG: Failed to load dev server:', err)
-      }
+      console.log('⚠️ DEBUG: Dev server not available, falling back to built files')
+      const indexPath = path.join(__dirname, '../dist/index.html')
+      console.log('🔧 DEBUG: Loading fallback build from:', indexPath)
+      mainWindow?.loadFile(indexPath).catch(fallbackErr => {
+        if (fallbackErr instanceof Error) {
+          console.error('❌ DEBUG: Failed to load fallback build:', fallbackErr.message)
+        } else {
+          console.error('❌ DEBUG: Failed to load fallback build:', fallbackErr)
+        }
+      })
     })
+    
+    // Also set up a timeout to fallback if dev server doesn't respond quickly
+    setTimeout(() => {
+      if (mainWindow?.webContents.getURL() === `http://localhost:${port}`) {
+        console.log('⚠️ DEBUG: Dev server timeout, falling back to built files')
+        const indexPath = path.join(__dirname, '../dist/index.html')
+        console.log('🔧 DEBUG: Loading fallback build from:', indexPath)
+        mainWindow?.loadFile(indexPath).catch(fallbackErr => {
+          if (fallbackErr instanceof Error) {
+            console.error('❌ DEBUG: Failed to load fallback build:', fallbackErr.message)
+          } else {
+            console.error('❌ DEBUG: Failed to load fallback build:', fallbackErr)
+          }
+        })
+      }
+    }, 3000) // 3 second timeout
+    
     mainWindow?.webContents.openDevTools()
   } else {
     // In production, load the built files

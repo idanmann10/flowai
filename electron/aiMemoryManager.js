@@ -8,6 +8,37 @@
 const OpenAI = require('openai');
 const { createClient } = require('@supabase/supabase-js');
 
+// Enhanced environment variable handling for production
+function getEnvironmentVariable(key, fallback = null) {
+    // Check multiple sources for environment variables
+    const sources = [
+        process.env[key],
+        process.env[`VITE_${key}`],
+        process.env[`REACT_APP_${key}`],
+        process.env[`ELECTRON_${key}`]
+    ];
+    
+    for (const value of sources) {
+        if (value) {
+            console.log(`✅ Found ${key} in environment`);
+            return value;
+        }
+    }
+    
+    if (fallback) {
+        console.log(`⚠️ Using fallback for ${key}`);
+        return fallback;
+    }
+    
+    console.error(`❌ Missing required environment variable: ${key}`);
+    return null;
+}
+
+// Get API keys with enhanced error handling
+const apiKey = getEnvironmentVariable('OPENAI_API_KEY');
+const supabaseUrl = getEnvironmentVariable('SUPABASE_URL');
+const supabaseKey = getEnvironmentVariable('SUPABASE_ANON_KEY');
+
 class AIMemoryManager {
   constructor() {
     this.openai = null;
@@ -19,8 +50,6 @@ class AIMemoryManager {
 
   async initializeOpenAI() {
     try {
-      const apiKey = process.env.VITE_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
-      
       if (!apiKey) {
         console.error('❌ OpenAI API key not found for memory manager');
         return;
@@ -39,9 +68,6 @@ class AIMemoryManager {
 
   async initializeSupabase() {
     try {
-      const supabaseUrl = process.env.VITE_SUPABASE_URL;
-      const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY;
-      
       if (!supabaseUrl || !supabaseKey) {
         console.error('❌ Supabase credentials not found for memory manager');
         return;

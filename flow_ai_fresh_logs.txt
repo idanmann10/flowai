@@ -1,0 +1,94 @@
+[dotenv@17.2.1] injecting env (3) from .env -- tip: 📡 observe env with Radar: https://dotenvx.com/radar
+[2025-08-08T14:55:19.878Z] [INFO] 🔧 MAIN: Importing TrackerStore System...
+🚨 MAIN PROCESS: About to load TrackerStore...
+[2025-08-08T14:55:19.879Z] [INFO] 🔧 MAIN: Importing AI Summary Service...
+[2025-08-08T14:55:19.879Z] [INFO] 🔍 MAIN DEBUG: Loading TrackerStore from production path: ../tracker/v3/connector/tracker-store
+[2025-08-08T14:55:19.880Z] 🔍 DEBUG: About to require agent-manager...
+[2025-08-08T14:55:19.880Z] 🔍 DEBUG: __dirname: /Volumes/Flow AI 7/Flow AI.app/Contents/Resources/app.asar/tracker/v3/connector
+[2025-08-08T14:55:19.880Z] 🔍 DEBUG: Attempting to load agent-manager from: /Volumes/Flow AI 7/Flow AI.app/Contents/Resources/app.asar/tracker/v3/connector/agent-manager
+[2025-08-08T14:55:19.883Z] 🚨 AGENT-MANAGER.JS LOADED - THIS SHOULD BE VISIBLE!
+[2025-08-08T14:55:19.883Z] ✅ DEBUG: agent-manager loaded successfully
+🔍 DEBUG: About to require event-processor...
+[2025-08-08T14:55:19.884Z] [INFO] ✅ MAIN DEBUG: TrackerStore loaded successfully
+🚨 MAIN PROCESS: TrackerStore loaded successfully!
+[2025-08-08T14:55:19.884Z] [INFO] 🔍 MAIN DEBUG: TrackerStore loaded, creating instance...
+🔍 DEBUG: Finding agent path - isDev: false
+🔍 DEBUG: Production mode - resourcesPath: /Volumes/Flow AI 7/Flow AI.app/Contents/Resources
+🔍 DEBUG: Checking production agent path: /Volumes/Flow AI 7/Flow AI.app/Contents/Resources/tracker-agent
+✅ Found production agent at: /Volumes/Flow AI 7/Flow AI.app/Contents/Resources/tracker-agent
+🔧 TokenOptimizer: Constructor called with config: {
+  coalesceTextInputs: true,
+  coalesceDuplicateSnapshots: true,
+  coalesceNetworkBursts: true,
+  removeUselessEvents: true,
+  maxScrollEventsPerMinute: 3,
+  minTimeBetweenSnapshots: 30000
+}
+🔧 TokenOptimizer: Initialized with config: {
+  coalesceTextInputs: true,
+  coalesceDuplicateSnapshots: true,
+  coalesceNetworkBursts: true,
+  networkBurstWindow: 2000,
+  maxTextCoalesceGap: 10000,
+  maxScrollEventsPerMinute: 3,
+  minTimeBetweenSnapshots: 30000,
+  removeUselessEvents: true,
+  onlySnapshotActiveApp: true
+}
+❌ Failed to create data directories: TypeError [ERR_INVALID_ARG_TYPE]: The "cb" argument must be of type function. Received undefined
+    at makeCallback (node:fs:198:3)
+    at Object.mkdir (node:fs:1360:14)
+    at TrackerStore.ensureDataDirectories (/Volumes/Flow AI 7/Flow AI.app/Contents/Resources/app.asar/tracker/v3/connector/tracker-store.js:175:22)
+    at new TrackerStore (/Volumes/Flow AI 7/Flow AI.app/Contents/Resources/app.asar/tracker/v3/connector/tracker-store.js:98:14)
+    at Object.<anonymous> (/Volumes/Flow AI 7/Flow AI.app/Contents/Resources/app.asar/electron/main.js:103:20)
+    at Module._compile (node:internal/modules/cjs/loader:1271:14)
+    at Module._extensions..js (node:internal/modules/cjs/loader:1326:10)
+    at Module.load (node:internal/modules/cjs/loader:1126:32)
+    at Module._load (node:internal/modules/cjs/loader:967:12)
+    at c._load (node:electron/js2c/node_init:2:13672) {
+  code: 'ERR_INVALID_ARG_TYPE'
+}
+[2025-08-08T14:55:19.886Z] [true] 🔍 MAIN DEBUG: TrackerStore created:
+[2025-08-08T14:55:19.886Z] [INFO] ✅ MAIN: TrackerStore System created successfully
+[2025-08-08T14:55:19.886Z] [INFO] 🔍 MAIN DEBUG: Loading AI Summary Service...
+⚠️  Node.js 18 and below are deprecated and will no longer be supported in future versions of @supabase/supabase-js. Please upgrade to Node.js 20 or later. For more information, visit: https://github.com/orgs/supabase/discussions/37217
+✅ Found OPENAI_API_KEY in environment
+✅ Found SUPABASE_URL in environment
+✅ Found SUPABASE_ANON_KEY in environment
+✅ AI Memory Manager initialized
+✅ AI Memory Manager Supabase client initialized
+✅ AI Memory Manager loaded successfully
+✅ Found OPENAI_API_KEY in environment
+✅ Found SUPABASE_URL in environment
+✅ Found SUPABASE_ANON_KEY in environment
+✅ OpenAI service initialized
+✅ Supabase client initialized
+[2025-08-08T14:55:19.932Z] [INFO] ✅ MAIN: AI Summary Service loaded successfully
+✅ MAIN: TrackerStore v3.0 integration complete
+✅ MAIN: Tracker IPC handlers registered
+🔍 MAIN DEBUG: Registered handlers:
+  - tracker:start
+  - tracker:stop
+  - tracker:getRawEvents
+  - tracker:getOptimizedEvents
+  - tracker:getAISummaries
+  - tracker:updateSessionTodos
+  - tracker:getStatus
+[2025-08-08T14:55:20.068Z] [/Volumes/Flow AI 7/Flow AI.app/Contents/Resources/app.asar/dist/index.html] 🔧 DEBUG: Loading production build from:
+✅ MAIN: Global shortcuts registered
+[2025-08-08T14:55:20.336Z] [INFO] ✅ DEBUG: Renderer process loaded successfully
+🧪 [AI MEMORY] Testing embedding functionality...
+🔮 [AI MEMORY] Generating embedding for text...
+📄 [AI MEMORY] Text preview: Working on VS Code, productivity 85%, completed coding tasks...
+📊 [AI MEMORY] Text length: 60 characters
+🌐 [AI MEMORY] Using OpenAI text-embedding-3-small model
+✅ [AI MEMORY] Embedding generated successfully!
+📐 [AI MEMORY] Embedding dimensions: 1536
+🔢 [AI MEMORY] First 5 embedding values: [
+  -0.016567159444093704,
+  -0.003203390398994088,
+  0.00370868225581944,
+  0.0196726992726326,
+  0.05379514396190643
+]
+✅ [AI MEMORY] Embedding test successful - dimensions: 1536

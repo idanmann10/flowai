@@ -1,6 +1,5 @@
 import Foundation
 import Cocoa
-import ApplicationServices
 
 // MARK: - Main Tracker Agent
 
@@ -20,11 +19,8 @@ class TrackerAgent {
         guard !isRunning else { return }
         isRunning = true
         
-        // Request accessibility permissions
-        if !AXIsProcessTrusted() {
-            print("Accessibility permissions required. Please grant permissions in System Preferences.")
-            return
-        }
+        print("🚀 Starting tracker agent...")
+        fflush(stdout)
         
         // Output session start event
         outputEvent(type: "session_start", data: [
@@ -34,14 +30,27 @@ class TrackerAgent {
         ])
         
         // Set up event monitoring
+        print("📡 Setting up event monitoring...")
+        fflush(stdout)
         setupEventMonitoring()
         
         // Start periodic content snapshots
+        print("📸 Starting periodic snapshots...")
+        fflush(stdout)
         startPeriodicSnapshots()
         
         // Keep the agent running
-        print("Tracker agent started. Session ID: \(sessionId)")
-        RunLoop.main.run()
+        print("✅ Tracker agent started. Session ID: \(sessionId)")
+        print("🔄 Running main loop...")
+        fflush(stdout)
+        
+        // Run the main loop with error handling
+        do {
+            RunLoop.main.run()
+        } catch {
+            print("❌ Error in main loop: \(error)")
+            fflush(stdout)
+        }
     }
     
     func stop() {
@@ -55,15 +64,22 @@ class TrackerAgent {
     }
     
     private func setupEventMonitoring() {
+        print("🔧 Setting up global event monitors...")
+        fflush(stdout)
+        
         // Monitor key events
         NSEvent.addGlobalMonitorForEvents(matching: [.keyDown, .keyUp]) { event in
             self.handleKeyEvent(event)
         }
+        print("✅ Key event monitor set up")
+        fflush(stdout)
         
         // Monitor mouse events
         NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp, .rightMouseDown, .rightMouseUp]) { event in
             self.handleMouseEvent(event)
         }
+        print("✅ Mouse event monitor set up")
+        fflush(stdout)
         
         // Monitor application switching
         NSWorkspace.shared.notificationCenter.addObserver(
@@ -73,12 +89,16 @@ class TrackerAgent {
         ) { notification in
             self.handleAppSwitch(notification)
         }
+        print("✅ App switch monitor set up")
+        fflush(stdout)
         
         // Monitor clipboard changes
         clipboardTracker.onClipboardChange = { [weak self] event in
             self?.handleClipboardChange(event)
         }
         clipboardTracker.startMonitoring()
+        print("✅ Clipboard monitor set up")
+        fflush(stdout)
     }
     
     private func startPeriodicSnapshots() {

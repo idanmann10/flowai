@@ -1,12 +1,69 @@
 const { EventEmitter } = require('events');
-const TrackerAgentManager = require('./agent-manager');
+const path = require('path');
+const fs = require('fs');
+const fsPromises = require('fs').promises;
+const os = require('os');
+
+// Set up logging to file for production debugging
+const logPath = path.join(os.homedir(), 'flow-debug.log');
+
+function log(message) {
+  const timestamp = new Date().toISOString();
+  const logMessage = `[${timestamp}] ${message}`;
+  console.log(logMessage);
+  try {
+    fs.appendFileSync(logPath, logMessage + '\n');
+  } catch (error) {
+    console.error('Failed to write to log file:', error);
+  }
+}
+
+log('🔍 DEBUG: About to require agent-manager...');
+let TrackerAgentManager;
+try {
+    // Use __dirname-safe path resolution that works in both development and production ASAR
+    log(`🔍 DEBUG: __dirname: ${__dirname}`);
+    const agentManagerPath = path.join(__dirname, 'agent-manager');
+    log(`🔍 DEBUG: Attempting to load agent-manager from: ${agentManagerPath}`);
+    TrackerAgentManager = require(agentManagerPath);
+    log('✅ DEBUG: agent-manager loaded successfully');
+} catch (error) {
+    log(`❌ DEBUG: Failed to load agent-manager: ${error.message}`);
+    log(`❌ DEBUG: Error stack: ${error.stack}`);
+    throw error;
+}
+console.log('🔍 DEBUG: About to require event-processor...');
 const EventProcessor = require('./event-processor');
-const TokenOptimizerModule = require('../../../src/services/tokenOptimizerNode.js');
+let TokenOptimizerModule;
+try {
+    // Try the development path first
+    TokenOptimizerModule = require('../../../src/services/tokenOptimizerNode.js');
+} catch (error) {
+    try {
+        // Try the production path (from tracker directory)
+        TokenOptimizerModule = require('../../src/services/tokenOptimizerNode.js');
+    } catch (error2) {
+        try {
+            // Try absolute path from project root
+            const projectRoot = path.join(__dirname, '..', '..', '..');
+            TokenOptimizerModule = require(path.join(projectRoot, 'src', 'services', 'tokenOptimizerNode.js'));
+        } catch (error3) {
+            console.error('❌ Failed to load TokenOptimizerModule:', error3.message);
+            // Create a fallback module
+            TokenOptimizerModule = {
+                default: class TokenOptimizer {
+                    constructor(config) {
+                        console.log('⚠️ Using fallback TokenOptimizer');
+                        this.config = config;
+                    }
+                    optimize() { return []; }
+                }
+            };
+        }
+    }
+}
 const TokenOptimizer = TokenOptimizerModule.default || TokenOptimizerModule;
 const { AISummaryManager } = require('./ai-summary-manager');
-const path = require('path');
-const fs = require('fs').promises;
-const os = require('os');
 
 /**
  * TrackerStore - Central state management for Tracker v3
@@ -88,6 +145,16 @@ class TrackerStore extends EventEmitter {
         const platform = os.platform();
         const homeDir = os.homedir();
         
+        // Use Electron's app.getPath in production
+        if (typeof require !== 'undefined' && require('electron')) {
+            try {
+                const { app } = require('electron');
+                return path.join(app.getPath('userData'), 'sessions');
+            } catch (error) {
+                console.log('⚠️ Could not get Electron app path, using fallback');
+            }
+        }
+        
         switch (platform) {
             case 'darwin': // macOS
                 return path.join(homeDir, 'Library', 'Application Support', 'LevelAI', 'sessions');
@@ -105,9 +172,9 @@ class TrackerStore extends EventEmitter {
      */
     async ensureDataDirectories() {
         try {
-            await fs.mkdir(this.userDataPath, { recursive: true });
-            await fs.mkdir(this.rawDataPath, { recursive: true });
-            await fs.mkdir(this.optimizedDataPath, { recursive: true });
+            await fsPromises.mkdir(this.userDataPath, { recursive: true });
+            await fsPromises.mkdir(this.rawDataPath, { recursive: true });
+            await fsPromises.mkdir(this.optimizedDataPath, { recursive: true });
             console.log('✅ Data directories ensured at:', this.userDataPath);
         } catch (error) {
             console.error('❌ Failed to create data directories:', error);
@@ -258,7 +325,7 @@ class TrackerStore extends EventEmitter {
             const filename = `raw_${timestamp}_${Date.now()}.json`;
             const filepath = path.join(this.rawDataPath, filename);
             
-            await fs.writeFile(filepath, JSON.stringify(event, null, 2));
+            await fsPromises.writeFile(filepath, JSON.stringify(event, null, 2));
             
             this.updateState({
                 stats: {
@@ -301,7 +368,7 @@ class TrackerStore extends EventEmitter {
                 )
             };
             
-            await fs.writeFile(filepath, JSON.stringify(data, null, 2));
+            await fsPromises.writeFile(filepath, JSON.stringify(data, null, 2));
             
             // Only log every 5th batch to reduce noise
             if (this.optimizedEventsMemory.length % 5 === 0) {
@@ -833,14 +900,14 @@ class TrackerStore extends EventEmitter {
      */
     async cleanupDirectory(dirPath, cutoffDate) {
         try {
-            const files = await fs.readdir(dirPath);
+            const files = await fsPromises.readdir(dirPath);
             
             for (const file of files) {
                 const filePath = path.join(dirPath, file);
-                const stats = await fs.stat(filePath);
+                const stats = await fsPromises.stat(filePath);
                 
                 if (stats.mtime < cutoffDate) {
-                    await fs.unlink(filePath);
+                    await fsPromises.unlink(filePath);
                     console.log(`🗑️ Deleted old file: ${file}`);
                 }
             }
@@ -874,13 +941,13 @@ class TrackerStore extends EventEmitter {
      */
     async getDirectoryStats(dirPath) {
         try {
-            const files = await fs.readdir(dirPath);
+            const files = await fsPromises.readdir(dirPath);
             let totalSize = 0;
             let fileCount = 0;
             
             for (const file of files) {
                 const filePath = path.join(dirPath, file);
-                const stats = await fs.stat(filePath);
+                const stats = await fsPromises.stat(filePath);
                 totalSize += stats.size;
                 fileCount++;
             }

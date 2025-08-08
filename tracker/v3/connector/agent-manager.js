@@ -2,6 +2,24 @@ const { spawn } = require('child_process');
 const path = require('path');
 const { EventEmitter } = require('events');
 const { v4: uuidv4 } = require('uuid');
+const fs = require('fs');
+const os = require('os');
+
+// Set up logging to file for production debugging
+const logPath = path.join(os.homedir(), 'flow-debug.log');
+
+function log(message) {
+  const timestamp = new Date().toISOString();
+  const logMessage = `[${timestamp}] ${message}`;
+  console.log(logMessage);
+  try {
+    fs.appendFileSync(logPath, logMessage + '\n');
+  } catch (error) {
+    console.error('Failed to write to log file:', error);
+  }
+}
+
+log('🚨 AGENT-MANAGER.JS LOADED - THIS SHOULD BE VISIBLE!');
 
 /**
  * TrackerAgentManager - Manages the Swift CLI tracking agent
@@ -22,27 +40,88 @@ class TrackerAgentManager extends EventEmitter {
     }
     
     /**
-     * Find the Swift agent executable path
+     * Find the Swift agent executable path with enhanced production support
      */
     findAgentPath() {
-        // Path relative to the tracker v3 directory
-        const agentDir = path.join(__dirname, '..', 'agent-macos-swift');
-        const possiblePaths = [
-            path.join(agentDir, 'tracker-agent'), // Direct binary in agent directory
-            path.join(agentDir, '.build', 'debug', 'tracker-agent'),
-            path.join(agentDir, '.build', 'release', 'tracker-agent'),
-            // Fallback to building with swift run
-            null
-        ];
+        const isDev = process.env.NODE_ENV === 'development';
+        console.log(`🔍 DEBUG: Finding agent path - isDev: ${isDev}`);
         
-        for (const agentPath of possiblePaths) {
-            if (agentPath && require('fs').existsSync(agentPath)) {
-                return agentPath;
+        if (isDev) {
+            // Development paths
+            const agentDir = path.join(__dirname, '..', 'agent-macos-swift');
+            const projectRoot = path.join(__dirname, '..', '..', '..'); // Go up to project root
+            const possiblePaths = [
+                path.join(projectRoot, 'tracker-agent'), // Binary in project root
+                path.join(agentDir, 'tracker-agent'), // Direct binary in agent directory
+                path.join(agentDir, '.build', 'debug', 'tracker-agent'),
+                path.join(agentDir, '.build', 'release', 'tracker-agent'),
+                // Fallback to building with swift run
+                null
+            ];
+            
+            for (const agentPath of possiblePaths) {
+                if (agentPath && fs.existsSync(agentPath)) {
+                    console.log(`✅ Found agent at: ${agentPath}`);
+                    return agentPath;
+                }
+            }
+            
+            // Return the project directory for swift run command
+            return agentDir;
+        } else {
+            // Production paths - agent should be in resources
+            const resourcesPath = process.resourcesPath;
+            console.log(`🔍 DEBUG: Production mode - resourcesPath: ${resourcesPath}`);
+            
+            // Check if we're in a packaged app (resourcesPath exists)
+            if (resourcesPath) {
+                // The binary is directly in the resources directory
+                const agentPath = path.join(resourcesPath, 'tracker-agent');
+                console.log(`🔍 DEBUG: Checking production agent path: ${agentPath}`);
+                
+                if (fs.existsSync(agentPath)) {
+                    console.log(`✅ Found production agent at: ${agentPath}`);
+                    return agentPath;
+                } else {
+                    console.error('❌ No agent found in production path');
+                    console.error('Expected path:', agentPath);
+                    console.error('Resources directory contents:', fs.readdirSync(resourcesPath));
+                    return null;
+                }
+            } else {
+                // We're in production mode but not in a packaged app (development testing)
+                // Use the same paths as development mode
+                const agentDir = path.join(__dirname, '..', 'agent-macos-swift');
+                const projectRoot = path.join(__dirname, '..', '..', '..'); // Go up to project root
+                console.log(`🔍 DEBUG: Production test mode - agentDir: ${agentDir}, projectRoot: ${projectRoot}`);
+                const possiblePaths = [
+                    path.join(projectRoot, 'tracker-agent'), // Binary in project root
+                    path.join(agentDir, 'tracker-agent'), // Direct binary in agent directory
+                    path.join(agentDir, '.build', 'debug', 'tracker-agent'),
+                    path.join(agentDir, '.build', 'release', 'tracker-agent'),
+                    // Fallback to building with swift run
+                    null
+                ];
+                
+                console.log(`🔍 DEBUG: Checking production test paths:`);
+                for (const agentPath of possiblePaths) {
+                    if (agentPath) {
+                        console.log(`  🔍 Checking: ${agentPath}`);
+                        const exists = fs.existsSync(agentPath);
+                        console.log(`    ${exists ? '✅ EXISTS' : '❌ NOT FOUND'}`);
+                        if (exists) {
+                            console.log(`✅ Found production test agent at: ${agentPath}`);
+                            return agentPath;
+                        }
+                    }
+                }
+                
+                console.log(`🔍 DEBUG: No binary found in production mode`);
+                // In production mode, we can't use swift run because the project is in ASAR
+                // Return null to indicate no agent is available
+                return null;
             }
         }
-        
-        // Return the project directory for swift run command
-        return agentDir;
     }
     
     /**
@@ -59,6 +138,9 @@ class TrackerAgentManager extends EventEmitter {
             this.startTime = new Date();
             this.eventBuffer = [];
             
+            log(`🚀 Starting tracker agent with session ID: ${this.sessionId}`);
+            log(`🔍 Agent path: ${this.agentPath}`);
+            
             await this.spawnAgent();
             this.isRunning = true;
             
@@ -67,9 +149,11 @@ class TrackerAgentManager extends EventEmitter {
                 startTime: this.startTime
             });
             
-            console.log(`Tracker agent started with session ID: ${this.sessionId}`);
+            log(`✅ Tracker agent started successfully`);
             
         } catch (error) {
+            log(`❌ Failed to start tracker agent: ${error.message}`);
+            log(`❌ Error stack: ${error.stack}`);
             this.emit('error', error);
             throw error;
         }
@@ -160,49 +244,94 @@ class TrackerAgentManager extends EventEmitter {
     }
     
     /**
-     * Spawn the Swift agent process
+     * Spawn the Swift agent process with enhanced error handling
      */
     async spawnAgent() {
         return new Promise((resolve, reject) => {
             let command, args;
             
-            if (this.agentPath && require('fs').existsSync(this.agentPath)) {
+            log(`🔍 DEBUG: spawnAgent - agentPath: ${this.agentPath}`);
+            log(`🔍 DEBUG: spawnAgent - agentPath exists: ${this.agentPath ? fs.existsSync(this.agentPath) : 'N/A'}`);
+            
+            if (this.agentPath && fs.existsSync(this.agentPath)) {
                 // Use compiled binary
                 command = this.agentPath;
                 args = [];
-            } else {
-                // Use swift run command
+                log(`🔧 Using compiled binary: ${command}`);
+            } else if (this.agentPath) {
+                // Use swift run command (development only)
                 command = 'swift';
                 args = ['run', 'tracker-agent'];
+                log(`🔧 Using swift run: ${command} ${args.join(' ')}`);
+            } else {
+                // No agent available (production mode without binary)
+                log(`❌ No agent available - agentPath is null`);
+                reject(new Error('No tracker agent available. Please ensure the agent binary is compiled and included in the app bundle.'));
+                return;
             }
             
-            console.log(`Spawning agent: ${command} ${args.join(' ')}`);
+            log(`🚀 Spawning agent: ${command} ${args.join(' ')}`);
             
-            this.agentProcess = spawn(command, args, {
-                cwd: this.agentPath ? path.dirname(this.agentPath) : this.agentPath,
+            const spawnOptions = {
                 stdio: ['pipe', 'pipe', 'pipe'],
                 env: {
                     ...process.env,
                     // Ensure agent runs in foreground mode
-                    TRACKER_SESSION_ID: this.sessionId
+                    TRACKER_SESSION_ID: this.sessionId,
+                    // Add explicit environment variables for Swift
+                    DYLD_LIBRARY_PATH: process.env.DYLD_LIBRARY_PATH || '',
+                    DYLD_FRAMEWORK_PATH: process.env.DYLD_FRAMEWORK_PATH || '',
+                    // Ensure proper permissions
+                    HOME: process.env.HOME || require('os').homedir(),
+                    USER: process.env.USER || require('os').userInfo().username,
+                    // Add debugging
+                    DEBUG: '1'
                 }
-            });
+            };
+            
+            // Set working directory
+            if (this.agentPath && fs.existsSync(this.agentPath)) {
+                // If it's a binary file, use its directory
+                spawnOptions.cwd = path.dirname(this.agentPath);
+                log(`🔍 DEBUG: Using binary directory as cwd: ${spawnOptions.cwd}`);
+                
+                // In production, the binary is in Resources, so we need to use the user's home directory
+                if (process.env.NODE_ENV !== 'development') {
+                    // Use the user's home directory for production
+                    spawnOptions.cwd = require('os').homedir();
+                    log(`🔍 DEBUG: Production mode - using home directory as cwd: ${spawnOptions.cwd}`);
+                }
+            } else if (this.agentPath) {
+                // If it's a directory (for swift run), use it directly
+                spawnOptions.cwd = this.agentPath;
+                log(`🔍 DEBUG: Using agent directory as cwd: ${spawnOptions.cwd}`);
+            } else {
+                // Fallback to the agent directory
+                spawnOptions.cwd = path.join(__dirname, '..', 'agent-macos-swift');
+                log(`🔍 DEBUG: Using fallback directory as cwd: ${spawnOptions.cwd}`);
+            }
+            
+            log(`🔍 DEBUG: About to spawn with options: ${JSON.stringify(spawnOptions)}`);
+            this.agentProcess = spawn(command, args, spawnOptions);
             
             // Handle stdout (JSON events)
             this.agentProcess.stdout.on('data', (data) => {
-                this.handleAgentOutput(data.toString());
+                const output = data.toString();
+                log(`Agent stdout: ${output}`);
+                this.handleAgentOutput(output);
             });
             
             // Handle stderr (logs and errors)
             this.agentProcess.stderr.on('data', (data) => {
                 const error = data.toString().trim();
-                console.error('Agent stderr:', error);
+                log(`Agent stderr: ${error}`);
                 this.emit('agentError', error);
             });
             
             // Handle process exit
             this.agentProcess.on('exit', (code, signal) => {
-                console.log(`Agent process exited with code ${code}, signal ${signal}`);
+                log(`Agent process exited with code ${code}, signal ${signal}`);
+                log(`Agent process killed: ${this.agentProcess?.killed}`);
                 this.isRunning = false;
                 this.agentProcess = null;
                 this.emit('agentExit', { code, signal });
@@ -210,20 +339,39 @@ class TrackerAgentManager extends EventEmitter {
             
             // Handle process errors
             this.agentProcess.on('error', (error) => {
-                console.error('Agent process error:', error);
+                log(`Agent process error: ${error.message}`);
+                log(`Agent process error stack: ${error.stack}`);
+                log(`Agent process error code: ${error.code}`);
+                log(`Agent process error errno: ${error.errno}`);
                 this.isRunning = false;
                 this.agentProcess = null;
                 reject(error);
             });
             
+            // Handle process close
+            this.agentProcess.on('close', (code, signal) => {
+                log(`Agent process closed with code ${code}, signal ${signal}`);
+                if (code !== 0) {
+                    log(`Agent process closed with non-zero code: ${code}`);
+                    this.isRunning = false;
+                    this.agentProcess = null;
+                    reject(new Error(`Agent process closed with code ${code}`));
+                }
+            });
+            
             // Wait a bit to ensure process started successfully
             setTimeout(() => {
                 if (this.agentProcess && !this.agentProcess.killed) {
+                    log('✅ Agent process started successfully');
                     resolve();
                 } else {
+                    log('❌ Failed to start agent process');
+                    log(`❌ Agent process killed: ${this.agentProcess?.killed}`);
+                    log(`❌ Agent process exit code: ${this.agentProcess?.exitCode}`);
+                    log(`❌ Agent process pid: ${this.agentProcess?.pid}`);
                     reject(new Error('Failed to start agent process'));
                 }
-            }, 1000);
+            }, 5000); // Increased timeout to 5 seconds
         });
     }
     
@@ -261,13 +409,13 @@ class TrackerAgentManager extends EventEmitter {
     }
     
     /**
-     * Test agent availability
+     * Test agent availability with enhanced error reporting
      */
     async testAgent() {
         return new Promise((resolve, reject) => {
             let command, args;
             
-            if (this.agentPath && require('fs').existsSync(this.agentPath)) {
+            if (this.agentPath && fs.existsSync(this.agentPath)) {
                 command = this.agentPath;
                 args = ['--test'];
             } else {
@@ -275,10 +423,19 @@ class TrackerAgentManager extends EventEmitter {
                 args = ['run', 'tracker-agent', '--test'];
             }
             
-            const testProcess = spawn(command, args, {
-                cwd: this.agentPath.includes('.build') ? path.dirname(this.agentPath) : this.agentPath,
+            console.log(`🧪 Testing agent: ${command} ${args.join(' ')}`);
+            
+            const spawnOptions = {
                 stdio: ['pipe', 'pipe', 'pipe']
-            });
+            };
+            
+            if (this.agentPath && fs.existsSync(this.agentPath)) {
+                spawnOptions.cwd = path.dirname(this.agentPath);
+            } else if (this.agentPath) {
+                spawnOptions.cwd = this.agentPath;
+            }
+            
+            const testProcess = spawn(command, args, spawnOptions);
             
             let output = '';
             let errorOutput = '';
@@ -293,17 +450,20 @@ class TrackerAgentManager extends EventEmitter {
             
             testProcess.on('exit', (code) => {
                 if (code === 0) {
+                    console.log('✅ Agent test successful');
                     resolve({
                         success: true,
                         output: output.trim(),
                         agentPath: this.agentPath
                     });
                 } else {
+                    console.error(`❌ Agent test failed with code ${code}: ${errorOutput}`);
                     reject(new Error(`Agent test failed with code ${code}: ${errorOutput}`));
                 }
             });
             
             testProcess.on('error', (error) => {
+                console.error('❌ Agent test error:', error);
                 reject(error);
             });
         });

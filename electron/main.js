@@ -1,6 +1,13 @@
 // Load environment variables first
 require('dotenv').config();
 
+const { app, BrowserWindow, ipcMain, Tray, Menu, globalShortcut } = require('electron');
+const path = require('path');
+const fs = require('fs');
+
+// Define isDev early for logging - check if we're running from source vs packaged
+var isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
+
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -46,45 +53,96 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
     }
     return to.concat(ar || Array.prototype.slice.call(from));
 };
-const { app, BrowserWindow, ipcMain, Tray, Menu, globalShortcut } = require('electron');
-const path = require('path');
-// Import TrackerStore System
-console.log('🔧 MAIN: Importing TrackerStore System...');
-var trackerStore = null;
-// Import AI Summary Service
-console.log('🔧 MAIN: Importing AI Summary Service...');
-var aiSummaryService = null;
-try {
-    console.log('🔍 MAIN DEBUG: Loading TrackerStore...');
-    var TrackerStore = require('../tracker/v3/connector/tracker-store');
-    console.log('🔍 MAIN DEBUG: TrackerStore loaded, creating instance...');
-    // Create TrackerStore instance
-    trackerStore = new TrackerStore();
-    console.log('🔍 MAIN DEBUG: TrackerStore created:', !!trackerStore);
-    console.log('✅ MAIN: TrackerStore System created successfully');
-    // Try to load AI Summary Service
+// Enhanced logging for production debugging
+function logWithTimestamp(message, level = 'INFO') {
+    const timestamp = new Date().toISOString();
+    const logMessage = `[${timestamp}] [${level}] ${message}`;
+    console.log(logMessage);
+    
+    // Write to both app.log and flow-debug.log for easier access
+    const logDir = path.join(app.getPath('userData'), 'logs');
+    const logFile = path.join(logDir, 'app.log');
+    const homeLogFile = path.join(require('os').homedir(), 'flow-debug.log');
+    
     try {
-        console.log('🔍 MAIN DEBUG: Loading AI Summary Service...');
-        var aiService = require('./aiSummaryService').aiSummaryService;
-        aiSummaryService = aiService;
-        console.log('✅ MAIN: AI Summary Service loaded successfully');
-    }
-    catch (aiError) {
-        console.error('❌ MAIN: Failed to load AI Summary Service:', aiError.message);
-        console.log('⚠️ MAIN: AI processing will be disabled');
+        if (!fs.existsSync(logDir)) {
+            fs.mkdirSync(logDir, { recursive: true });
+        }
+        fs.appendFileSync(logFile, logMessage + '\n');
+        fs.appendFileSync(homeLogFile, logMessage + '\n');
+    } catch (error) {
+        console.error('Failed to write to log file:', error);
     }
 }
-catch (error) {
-    console.error('❌ MAIN: Failed to create tracking system:', error.message);
-    console.error('❌ MAIN: Error details:', error);
-    console.error('❌ MAIN: Stack trace:', error.stack);
+
+// Import TrackerStore System
+logWithTimestamp('🔧 MAIN: Importing TrackerStore System...');
+console.log('🚨 MAIN PROCESS: About to load TrackerStore...');
+var trackerStore = null;
+// Import AI Summary Service
+logWithTimestamp('🔧 MAIN: Importing AI Summary Service...');
+var aiSummaryService = null;
+try {
+    // Use different paths for development vs production
+    var TrackerStore;
+    if (isDev) {
+        // In development, main.js is run from electron/ directory, so use relative path from there
+        logWithTimestamp('🔍 MAIN DEBUG: Loading TrackerStore from development path: ../tracker/v3/connector/tracker-store');
+        TrackerStore = require('../tracker/v3/connector/tracker-store');
+    } else {
+        // In production, main.js is at /electron/main.js in asar, so use relative path from there
+        logWithTimestamp('🔍 MAIN DEBUG: Loading TrackerStore from production path: ../tracker/v3/connector/tracker-store');
+        TrackerStore = require('../tracker/v3/connector/tracker-store');
+    }
+    logWithTimestamp('✅ MAIN DEBUG: TrackerStore loaded successfully');
+    console.log('🚨 MAIN PROCESS: TrackerStore loaded successfully!');
+    
+    logWithTimestamp('🔍 MAIN DEBUG: TrackerStore loaded, creating instance...');
+    
+    // Create TrackerStore instance
+    trackerStore = new TrackerStore();
+    logWithTimestamp('🔍 MAIN DEBUG: TrackerStore created:', !!trackerStore);
+    logWithTimestamp('✅ MAIN: TrackerStore System created successfully');
+    
+    // Try to load AI Summary Service
+    try {
+        logWithTimestamp('🔍 MAIN DEBUG: Loading AI Summary Service...');
+        var aiService = require('./aiSummaryService').aiSummaryService;
+        aiSummaryService = aiService;
+        logWithTimestamp('✅ MAIN: AI Summary Service loaded successfully');
+    }
+    catch (aiError) {
+        logWithTimestamp('❌ MAIN: Failed to load AI Summary Service:', aiError.message);
+        logWithTimestamp('⚠️ MAIN: AI processing will be disabled');
+    }
+} catch (error) {
+    logWithTimestamp('❌ MAIN DEBUG: Failed to load TrackerStore');
+    logWithTimestamp('❌ MAIN DEBUG: Error:', error.message);
+    logWithTimestamp('❌ MAIN DEBUG: Error stack:', error.stack);
+    throw error;
 }
 // Global reference for AI summary communication
 global.mainWindow = null;
 var mainWindow = null;
 var tray = null;
-var isDev = process.env.NODE_ENV === 'development';
 var port = process.env.PORT || 5173;
+
+// Enhanced path resolution for production
+function getAppPath(relativePath) {
+    if (isDev) {
+        return path.join(__dirname, relativePath);
+    } else {
+        // In production, use app.getPath or process.resourcesPath
+        if (relativePath.startsWith('../')) {
+            // For files outside the app bundle (like dist folder)
+            return path.join(process.resourcesPath, 'app.asar', relativePath.substring(3));
+        } else {
+            // For files inside the app bundle
+            return path.join(__dirname, relativePath);
+        }
+    }
+}
+
 // TrackerStore state
 var isTrackerRunning = false;
 var trackerSessionId = null;
@@ -107,6 +165,14 @@ function setupTrackerIPC() {
                 case 0:
                     _a.trys.push([0, 4, , 5]);
                     console.log('🚀 MAIN: Starting TrackerStore system...');
+                    
+                        // Check if trackerStore is available
+    logWithTimestamp(`🔍 DEBUG: TrackerStore check - trackerStore: ${!!trackerStore}`);
+    if (!trackerStore) {
+        logWithTimestamp('❌ MAIN: TrackerStore not available');
+        return [2 /*return*/, { success: false, error: 'Tracker system not available' }];
+    }
+                    
                     if (!isTrackerRunning) return [3 /*break*/, 2];
                     console.log('⚠️ MAIN: TrackerStore already running, stopping first...');
                     return [4 /*yield*/, trackerStore.stopSession()];
@@ -361,7 +427,7 @@ function createWindow() {
         webPreferences: {
             nodeIntegration: true,
             contextIsolation: true,
-            preload: path.join(__dirname, 'preload.js'),
+            preload: getAppPath('preload.js'),
             // Temporarily disable for debugging
             sandbox: false,
             webSecurity: false
@@ -371,37 +437,72 @@ function createWindow() {
     global.mainWindow = mainWindow;
     // Load the app
     if (isDev) {
-        // In development, load from Vite dev server
-        console.log('🔧 DEBUG: Loading from dev server:', "http://localhost:".concat(port));
+        // In development, try dev server first, then fallback to built files
+        logWithTimestamp('🔧 DEBUG: Loading from dev server:', "http://localhost:".concat(port));
         mainWindow.loadURL("http://localhost:".concat(port)).catch(function (err) {
-            console.error('❌ DEBUG: Failed to load dev server:', err);
+            logWithTimestamp('⚠️ DEBUG: Dev server not available, falling back to built files');
+            var indexPath = getAppPath('../dist/index.html');
+            logWithTimestamp('🔧 DEBUG: Loading fallback build from:', indexPath);
+            mainWindow.loadFile(indexPath).catch(function (fallbackErr) {
+                logWithTimestamp('❌ DEBUG: Failed to load fallback build:', fallbackErr.message);
+            });
         });
         mainWindow.webContents.openDevTools();
     }
     else {
         // In production, load the built files
-        var indexPath = path.join(__dirname, '../dist/index.html');
-        console.log('🔧 DEBUG: Loading production build from:', indexPath);
+        var indexPath = getAppPath('../dist/index.html');
+        logWithTimestamp('🔧 DEBUG: Loading production build from:', indexPath);
+        
+        // Check if the file exists
+        const fs = require('fs');
+        if (!fs.existsSync(indexPath)) {
+            logWithTimestamp('❌ DEBUG: Index file not found at:', indexPath);
+            // Try alternative paths
+            const altPaths = [
+                path.join(__dirname, '../dist/index.html'),
+                path.join(process.resourcesPath, 'app.asar.unpacked/dist/index.html'),
+                path.join(process.resourcesPath, 'dist/index.html')
+            ];
+            
+            for (const altPath of altPaths) {
+                if (fs.existsSync(altPath)) {
+                    logWithTimestamp('✅ DEBUG: Found index file at:', altPath);
+                    indexPath = altPath;
+                    break;
+                }
+            }
+        }
+        
         mainWindow.loadFile(indexPath).catch(function (err) {
-            console.error('❌ DEBUG: Failed to load production build:', err);
+            logWithTimestamp('❌ DEBUG: Failed to load production build:', err);
+            logWithTimestamp('❌ DEBUG: Error details:', err.message);
         });
     }
     // Open DevTools in development
     if (isDev) {
         mainWindow.webContents.on('did-fail-load', function (_, errorCode, errorDescription) {
-            console.error('❌ DEBUG: Page failed to load:', errorCode, errorDescription);
+            logWithTimestamp('❌ DEBUG: Page failed to load:', errorCode, errorDescription);
         });
+    } else {
+        // In production, also log failures for debugging
+        mainWindow.webContents.on('did-fail-load', function (_, errorCode, errorDescription) {
+            logWithTimestamp('❌ PRODUCTION: Page failed to load:', errorCode, errorDescription);
+        });
+        
+        // Temporarily enable DevTools for debugging
+        mainWindow.webContents.openDevTools();
     }
     // Add renderer ready listener
     mainWindow.webContents.once('did-finish-load', function () {
-        console.log('✅ DEBUG: Renderer process loaded successfully');
+        logWithTimestamp('✅ DEBUG: Renderer process loaded successfully');
     });
 }
 function createTray() {
     var _this = this;
     var iconPath = isDev
-        ? path.join(__dirname, '../assets/flow ai logo.png')
-        : path.join(__dirname, 'assets/flow ai logo.png');
+        ? getAppPath('../assets/flow ai logo.png')
+        : getAppPath('assets/flow ai logo.png');
     tray = new Tray(iconPath);
     var contextMenu = Menu.buildFromTemplate([
         { label: 'Open Dashboard', click: function () { return mainWindow === null || mainWindow === void 0 ? void 0 : mainWindow.show(); } },
