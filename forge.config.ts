@@ -14,6 +14,13 @@ const config: ForgeConfig = {
     extraResource: [
       'tracker-agent'
     ],
+    // Code signing configuration - using Developer ID certificate for notarization
+    osxSign: {
+      identity: 'Developer ID Application: Idan Mann (4593N79G44)'
+    },
+    osxNotarize: {
+      keychainProfile: 'idanmann10@gmail.com'
+    },
     // Simplified ignore rules
     ignore: [
       /\.git/,

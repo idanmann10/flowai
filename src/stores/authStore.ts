@@ -46,21 +46,20 @@ export const useAuth = create<AuthState>((set) => ({
       if (sessionError) throw sessionError
 
       if (session?.user) {
-        // First, try to get the existing profile with role
+        // Try to get an existing minimal profile
         let { data: profile, error: profileError } = await supabase
           .from('profiles')
           .select(`
             id,
             email,
             full_name,
-            team_id,
-            role_id
+            team_id
           `)
           .eq('id', session.user.id)
           .single()
 
         if (profileError && profileError.code === 'PGRST116') {
-          // Profile doesn't exist, create it with default role
+          // No profile yet — create a minimal row (beta mode)
           const { data: newProfile, error: createError } = await supabase
             .from('profiles')
             .insert([
@@ -68,8 +67,7 @@ export const useAuth = create<AuthState>((set) => ({
                 id: session.user.id,
                 email: session.user.email,
                 full_name: null,
-                team_id: null,
-                role_id: 1 // Default member role
+                team_id: null
               }
             ])
             .select()
@@ -86,21 +84,8 @@ export const useAuth = create<AuthState>((set) => ({
           throw new Error('Failed to get or create profile')
         }
 
-        // Map role_id to role string
-        let role: User['role'] = defaultRole
-        switch (profile.role_id) {
-          case 1:
-            role = 'member'
-            break
-          case 2:
-            role = 'manager'
-            break
-          case 3:
-            role = 'founder'
-            break
-          default:
-            console.warn('Unknown role_id:', profile.role_id)
-        }
+        // Beta mode: default everyone to member
+        const role: User['role'] = defaultRole
 
         set({
           user: {
@@ -137,14 +122,13 @@ export const useAuth = create<AuthState>((set) => ({
             id,
             email,
             full_name,
-            team_id,
-            role_id
+            team_id
           `)
           .eq('id', session.user.id)
           .single()
 
         if (profileError && profileError.code === 'PGRST116') {
-          // Profile doesn't exist, create it with default role
+          // No profile yet — create a minimal row (beta mode)
           const { data: newProfile, error: createError } = await supabase
             .from('profiles')
             .insert([
@@ -152,8 +136,7 @@ export const useAuth = create<AuthState>((set) => ({
                 id: session.user.id,
                 email: session.user.email,
                 full_name: null,
-                team_id: null,
-                role_id: 1 // Default member role
+                team_id: null
               }
             ])
             .select()
@@ -170,21 +153,8 @@ export const useAuth = create<AuthState>((set) => ({
           throw new Error('Failed to get or create profile')
         }
 
-        // Map role_id to role string
-        let role: User['role'] = defaultRole
-        switch (profile.role_id) {
-          case 1:
-            role = 'member'
-            break
-          case 2:
-            role = 'manager'
-            break
-          case 3:
-            role = 'founder'
-            break
-          default:
-            console.warn('Unknown role_id:', profile.role_id)
-        }
+        // Beta mode: default everyone to member
+        const role: User['role'] = defaultRole
 
         set({
           user: {
