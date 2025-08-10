@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabaseClient';
 import { useSessionStore } from '../stores/sessionStore';
 import { useSessionSummaryStore } from '../stores/sessionSummaryStore';
 import { aiMemoryManager } from './aiMemoryManager';
+import { enhancedAIMemoryService } from './enhancedAIMemoryService';
 
 // Import TokenOptimizer dynamically for browser compatibility
 let TokenOptimizer: any = null;
@@ -526,14 +527,42 @@ Please respond with ONLY a JSON object:
           console.log('🧠 [AI MEMORY] User ID:', this.sessionData.userId);
           console.log('🧠 [AI MEMORY] Session ID:', this.sessionData.sessionId);
           
-          await aiMemoryManager.storeMemory(
+          // Store enhanced memory with additional context
+          await enhancedAIMemoryService.storeEnhancedMemory(
             analysis,
             this.sessionData.userId,
             this.sessionData.sessionId,
-            localSummary.id
+            localSummary.id,
+            {
+              energyLevel: analysis.energyLevel || undefined,
+              focusDuration: this.enhancedMetrics.activeTime.totalActiveMinutes,
+              breakEffectiveness: undefined // Will be set when breaks are analyzed
+            }
           );
-          console.log('✅ [AI MEMORY] Interval summary stored successfully in memory for pattern analysis');
-        } catch (memoryError) {
+          console.log('✅ [AI MEMORY] Enhanced interval summary stored successfully in memory for pattern analysis');
+          
+          // Get contextual advice based on current situation
+          const contextualAdvice = await enhancedAIMemoryService.getContextualAdvice(
+            analysis.summaryText,
+            this.sessionData.userId,
+            {
+              productivityScore: analysis.productivityPct || 0,
+              appUsage: analysis.appUsage || {},
+              energyLevel: analysis.energyLevel,
+              timeOfDay: new Date().getHours()
+            }
+          );
+          
+          if (contextualAdvice.confidence > 0.5) {
+            console.log('💡 [ENHANCED AI MEMORY] Contextual advice:', contextualAdvice.advice);
+            console.log('🎯 [ENHANCED AI MEMORY] Confidence:', contextualAdvice.confidence);
+            console.log('🧠 [ENHANCED AI MEMORY] Reasoning:', contextualAdvice.reasoning);
+            
+            // Store the advice in the local summary for UI display
+            (localSummary as any).contextualAdvice = contextualAdvice;
+          }
+          
+        } catch (memoryError: any) {
           console.error('❌ [AI MEMORY] Failed to store in AI memory:', memoryError);
           console.error('❌ [AI MEMORY] Error details:', memoryError.message);
         }

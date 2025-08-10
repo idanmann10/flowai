@@ -12,8 +12,8 @@ const { createClient } = require('@supabase/supabase-js');
 function getEnvironmentVariable(key, fallback = null) {
     // Check multiple sources for environment variables
     const sources = [
+        process.env[`VITE_${key}`], // Prioritize Vite variables first
         process.env[key],
-        process.env[`VITE_${key}`],
         process.env[`REACT_APP_${key}`],
         process.env[`ELECTRON_${key}`]
     ];

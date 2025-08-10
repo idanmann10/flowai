@@ -1096,11 +1096,11 @@ Analyze the data and provide specific, quantified insights:`;
         fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
-            'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+            'Authorization': `Bearer ${import.meta.env.VITE_OPENAI_API_KEY || process.env.OPENAI_API_KEY}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-            model: 'gpt-4o-mini',
+            model: 'gpt-4o',
           messages: [
             {
               role: 'system',
